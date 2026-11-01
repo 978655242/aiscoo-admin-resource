@@ -38,6 +38,7 @@ import { modelPricingDisplay } from '@/features/model-pricing/pricing'
 import { ModelPriceCell } from '@/features/pricing/components/model-price-cell'
 import { formatTimestampToDate } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { resolveModelProvider } from '@/lib/model-provider'
 
 import { getNameRuleConfig } from '../constants'
 import { parseModelTags, formatEndpointsDisplay } from '../lib'
@@ -53,7 +54,8 @@ const EMPTY_VENDORS: Vendor[] = []
 export function useModelsColumns(
   vendors: Vendor[] = EMPTY_VENDORS,
   pricing?: ModelPricingConfig,
-  pricingState?: 'loading' | 'error'
+  pricingState?: 'loading' | 'error',
+  squareIcons?: ReadonlyMap<string, string | undefined>
 ): ColumnDef<Model>[] {
   const { t } = useTranslation()
   const canPrice = useCanEditModelPricing()
@@ -103,7 +105,13 @@ export function useModelsColumns(
         cell: ({ row }) => {
           const model = row.original
           const vendor = vendorMap.get(model.vendor_id ?? 0)
-          const iconKey = model.icon || vendor?.icon || model.model_name[0]
+          const iconKey =
+            model.icon ||
+            (squareIcons?.has(model.model_name) && model.name_rule === 0
+              ? squareIcons.get(model.model_name) || model.model_name[0]
+              : vendor?.icon ||
+                resolveModelProvider(model.model_name)?.icon ||
+                model.model_name[0])
           return (
             <div className='flex max-w-[320px] min-w-0 items-start gap-2.5 py-1'>
               <span className='mt-1 flex size-6 shrink-0 items-center justify-center'>
@@ -379,5 +387,14 @@ export function useModelsColumns(
         meta: { mobileHidden: true },
       },
     ]
-  }, [t, canPrice, vendorMap, priceMap, pricingState, setCurrentRow, setOpen])
+  }, [
+    t,
+    canPrice,
+    vendorMap,
+    priceMap,
+    pricingState,
+    squareIcons,
+    setCurrentRow,
+    setOpen,
+  ])
 }

@@ -29,3 +29,16 @@ export async function getPricing(): Promise<PricingData> {
   const res = await api.get('/api/pricing')
   return res.data
 }
+
+export async function getPricingForModelIcons(
+  signal: AbortSignal
+): Promise<PricingData> {
+  const res = await api.get('/api/pricing', {
+    skipErrorHandler: true,
+    skipAuthRefresh: true,
+    disableDuplicate: true,
+    signal,
+    timeout: 3000,
+  })
+  return res.data
+}
