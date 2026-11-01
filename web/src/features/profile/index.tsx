@@ -16,13 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Main } from '@/components/layout'
-import {
-  CardStaggerContainer,
-  CardStaggerItem,
-} from '@/components/page-transition'
+import { useTranslation } from 'react-i18next'
+
+import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
-import { cn } from '@/lib/utils'
 
 import { CheckinCalendarCard } from './components/checkin-calendar-card'
 import { LanguagePreferencesCard } from './components/language-preferences-card'
@@ -31,6 +28,7 @@ import { ProfileSettingsCard } from './components/profile-settings-card'
 import { useProfile } from './hooks'
 
 export function Profile() {
+  const { t } = useTranslation()
   const { profile, loading, refreshProfile } = useProfile()
   const { status } = useStatus()
 
@@ -44,48 +42,36 @@ export function Profile() {
   const quotaRemindThreshold = status?.quota_remind_threshold ?? 0
 
   return (
-    <Main>
-      <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
-          <CardStaggerItem>
-            <ProfileHeader profile={profile} loading={loading} />
-          </CardStaggerItem>
+    <SectionPageLayout>
+      <SectionPageLayout.Title>{t('Profile')}</SectionPageLayout.Title>
+      <SectionPageLayout.Content>
+        <div className='@container/profile mx-auto flex w-full max-w-5xl flex-col gap-4'>
+          <ProfileHeader profile={profile} loading={loading} />
 
-          <CardStaggerItem>
-            <div
-              className={cn(
-                'grid gap-4 sm:gap-5 xl:items-start',
-                checkinEnabled &&
-                  'xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.46fr)]'
-              )}
-            >
-              <div className='space-y-4 sm:space-y-6'>
-                <ProfileSettingsCard
-                  profile={profile}
-                  loading={loading}
-                  onProfileUpdate={refreshProfile}
-                  quotaRemindEnabled={quotaRemindEnabled}
-                  quotaRemindThreshold={quotaRemindThreshold}
-                />
-                <LanguagePreferencesCard
-                  profile={profile}
-                  onProfileUpdate={refreshProfile}
-                />
-              </div>
-
+          <div className='grid min-w-0 grid-cols-1 items-start gap-4 @min-[52rem]/profile:grid-cols-[minmax(0,1fr)_18rem]'>
+            <ProfileSettingsCard
+              profile={profile}
+              loading={loading}
+              onProfileUpdate={refreshProfile}
+              quotaRemindEnabled={quotaRemindEnabled}
+              quotaRemindThreshold={quotaRemindThreshold}
+            />
+            <aside aria-label={t('Preferences')} className='min-w-0 space-y-4'>
+              <LanguagePreferencesCard
+                profile={profile}
+                onProfileUpdate={refreshProfile}
+              />
               {checkinEnabled && (
-                <div className='space-y-4 sm:space-y-6 xl:sticky xl:top-6'>
-                  <CheckinCalendarCard
-                    checkinEnabled={checkinEnabled}
-                    turnstileEnabled={turnstileEnabled}
-                    turnstileSiteKey={turnstileSiteKey}
-                  />
-                </div>
+                <CheckinCalendarCard
+                  checkinEnabled={checkinEnabled}
+                  turnstileEnabled={turnstileEnabled}
+                  turnstileSiteKey={turnstileSiteKey}
+                />
               )}
-            </div>
-          </CardStaggerItem>
-        </CardStaggerContainer>
-      </div>
-    </Main>
+            </aside>
+          </div>
+        </div>
+      </SectionPageLayout.Content>
+    </SectionPageLayout>
   )
 }

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Crown, RefreshCw, Sparkles, Check } from 'lucide-react'
+import { Crown, RefreshCw, Check } from 'lucide-react'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -27,7 +27,7 @@ import {
   textColorMap,
 } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import {
   Select,
@@ -52,9 +52,10 @@ import {
 } from '@/features/subscriptions/api'
 import { SubscriptionPurchaseDialog } from '@/features/subscriptions/components/dialogs/subscription-purchase-dialog'
 import { formatDuration, formatResetPeriod } from '@/features/subscriptions/lib'
-import type {
-  PlanRecord,
-  UserSubscriptionRecord,
+import {
+  zenPlanDisplaySchema,
+  type PlanRecord,
+  type UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
 import { formatQuota } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -238,15 +239,18 @@ export function SubscriptionPlansCard({
 
   if (loading) {
     return (
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
+      <Card
+        data-card-hover='false'
+        className='@container/plans min-w-0 gap-0 overflow-hidden py-0'
+      >
         <CardHeader className='border-b p-3 !pb-3 sm:p-5 sm:!pb-5'>
           <Skeleton className='h-6 w-32' />
         </CardHeader>
-        <CardContent className='space-y-4 p-3 sm:p-5'>
+        <CardContent className='flex flex-col gap-5 p-3 sm:p-5'>
           <Skeleton className='h-20 w-full' />
-          <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'>
-            {['first', 'second', 'third'].map((key) => (
-              <Skeleton key={key} className='h-48 w-full' />
+          <div className='grid grid-cols-1 gap-4 @min-[40rem]/plans:grid-cols-2 @min-[64rem]/plans:grid-cols-4'>
+            {['first', 'second', 'third', 'fourth'].map((key) => (
+              <Skeleton key={key} className='h-96 w-full rounded-2xl' />
             ))}
           </div>
         </CardContent>
@@ -266,11 +270,12 @@ export function SubscriptionPlansCard({
         icon={<Crown className='h-4 w-4' />}
         iconTone='warning'
         disableHoverEffect
-        contentClassName='space-y-4 sm:space-y-5'
+        className='@container/plans min-w-0'
+        contentClassName='flex min-w-0 flex-col gap-5'
       >
         {/* My subscriptions & billing preference */}
-        <div className='rounded-xl border p-3 sm:p-4'>
-          <div className='flex flex-wrap items-center justify-between gap-2.5 sm:gap-3'>
+        <div className='bg-muted/20 min-w-0 rounded-xl border p-3'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <span className='text-sm font-medium'>
                 {t('My Subscriptions')}
@@ -303,7 +308,7 @@ export function SubscriptionPlansCard({
                 )}
               </span>
             </div>
-            <div className='flex w-full items-center gap-2 sm:w-auto'>
+            <div className='flex w-full min-w-0 items-center gap-2 @min-[40rem]/plans:w-auto'>
               <Select
                 items={[
                   {
@@ -336,7 +341,7 @@ export function SubscriptionPlansCard({
                 value={billingPreference}
                 onValueChange={(v) => v !== null && handlePreferenceChange(v)}
               >
-                <SelectTrigger className='h-8 flex-1 text-xs sm:w-[140px] sm:flex-none'>
+                <SelectTrigger className='h-8 min-w-0 flex-1 text-xs @min-[40rem]/plans:w-44 @min-[40rem]/plans:flex-none'>
                   <SelectValue>
                     {getBillingPreferenceLabel(billingPreference, t)}
                   </SelectValue>
@@ -369,12 +374,14 @@ export function SubscriptionPlansCard({
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-8 w-8'
+                className='size-8'
+                aria-label={t('Refresh')}
                 onClick={handleRefresh}
                 disabled={refreshing}
               >
                 <RefreshCw
-                  className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
+                  aria-hidden='true'
+                  className={cn('size-3.5', refreshing && 'animate-spin')}
                 />
               </Button>
             </div>
@@ -397,7 +404,7 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
-              <div className='max-h-64 space-y-3 overflow-y-auto pr-1'>
+              <div className='grid max-h-56 min-w-0 grid-cols-1 gap-2 overflow-y-auto pr-1 @3xl/plans:grid-cols-2'>
                 {allSubscriptions.map((sub) => {
                   const subscription = sub.subscription
                   const totalAmount = Number(subscription?.amount_total || 0)
@@ -449,11 +456,11 @@ export function SubscriptionPlansCard({
                   return (
                     <div
                       key={subscription?.id}
-                      className='bg-background rounded-md border p-3 text-xs'
+                      className='bg-background min-w-0 rounded-lg border p-3 text-xs'
                     >
-                      <div className='flex items-center justify-between'>
-                        <div className='flex items-center gap-2'>
-                          <span className='font-medium'>
+                      <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5'>
+                        <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                          <span className='min-w-0 font-medium [overflow-wrap:anywhere] break-words'>
                             {planTitle
                               ? `${planTitle} · ${t('Subscription')} #${subscription?.id}`
                               : `${t('Subscription')} #${subscription?.id}`}
@@ -524,16 +531,27 @@ export function SubscriptionPlansCard({
 
         {/* Available plans grid */}
         {plans.length > 0 ? (
-          <div className='grid grid-cols-1 gap-3 2xl:grid-cols-2 2xl:gap-4'>
-            {plans.map((p, index) => {
+          <div
+            className={cn(
+              'grid grid-cols-1 gap-4',
+              plans.length > 1 && '@min-[40rem]/plans:grid-cols-2',
+              plans.length === 3 && '@min-[64rem]/plans:grid-cols-3',
+              plans.length >= 4 && '@min-[64rem]/plans:grid-cols-4'
+            )}
+          >
+            {plans.map((p) => {
               const plan = p?.plan
               if (!plan) return null
               const totalAmount = Number(plan.total_amount || 0)
               const price = Number(plan.price_amount || 0).toFixed(2)
-              const isPopular = index === 0 && plans.length > 1
               const limit = Number(plan.max_purchase_per_user || 0)
               const count = planPurchaseCountMap.get(plan.id) || 0
               const reached = limit > 0 && count >= limit
+              const displayResult = zenPlanDisplaySchema.safeParse(
+                plan.xcode_display
+              )
+              const display = displayResult.success ? displayResult.data : null
+              const highlights = [...new Set(display?.highlights ?? [])]
 
               const benefits = [
                 `${t('Validity Period')}: ${formatDuration(plan, t)}`,
@@ -547,84 +565,103 @@ export function SubscriptionPlansCard({
                 plan.upgrade_group
                   ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
                   : null,
-              ].filter(Boolean) as string[]
+              ].filter((label): label is string => label !== null)
+              const features = [
+                ...new Set([...benefits, ...(display?.features ?? [])]),
+              ]
 
               return (
-                <Card
+                <article
                   key={plan.id}
-                  data-card-hover='false'
-                  className={cn(isPopular && 'border-primary/70 shadow-sm')}
+                  aria-label={plan.title || t('Subscription Plans')}
+                  className='row-span-5 grid min-w-0 grid-rows-subgrid gap-0'
                 >
-                  <CardContent className='flex h-full flex-col p-3.5 sm:p-4'>
-                    <div className='mb-2 flex items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <h4 className='truncate font-semibold'>
-                          {plan.title || t('Subscription Plans')}
-                        </h4>
-                        {plan.subtitle && (
-                          <p className='text-muted-foreground truncate text-xs'>
-                            {plan.subtitle}
-                          </p>
-                        )}
-                      </div>
-                      {isPopular && (
-                        <StatusBadge
-                          variant='info'
-                          copyable={false}
-                          className='shrink-0'
-                        >
-                          <Sparkles className='h-3 w-3' />
-                          {t('Recommended')}
-                        </StatusBadge>
-                      )}
-                    </div>
+                  <Card
+                    data-card-hover='false'
+                    className='row-span-5 grid min-w-0 grid-rows-subgrid gap-0 rounded-2xl border py-0 shadow-none ring-0'
+                  >
+                    <CardHeader className='min-w-0 px-5 pt-5'>
+                      <h3 className='text-lg leading-snug font-semibold [overflow-wrap:anywhere] break-words'>
+                        {plan.title || t('Subscription Plans')}
+                      </h3>
+                    </CardHeader>
 
-                    <div className='py-2'>
-                      <span className='text-primary text-2xl font-bold'>
+                    <div className='min-w-0 px-5 pt-4'>
+                      <span className='text-4xl leading-tight font-semibold tracking-tight [overflow-wrap:anywhere] break-words tabular-nums'>
                         {plan.currency === 'CNY' ? '¥' : '$'}
                         {price}
                       </span>
                     </div>
 
-                    <div className='flex-1 space-y-1.5 pb-3'>
-                      {benefits.map((label) => (
-                        <div
-                          key={label}
-                          className='text-muted-foreground flex items-center gap-2 text-xs'
+                    <p className='text-muted-foreground min-w-0 px-5 pt-3 text-sm leading-relaxed [overflow-wrap:anywhere] break-words'>
+                      {plan.subtitle}
+                    </p>
+
+                    <CardContent className='flex min-w-0 flex-col gap-5 px-5 pt-5 pb-6'>
+                      {highlights.length > 0 && (
+                        <ul className='flex flex-col gap-3 text-sm font-medium'>
+                          {highlights.map((label) => (
+                            <li
+                              key={label}
+                              className='flex items-start gap-2.5'
+                            >
+                              <Check
+                                aria-hidden='true'
+                                className='text-primary mt-0.5 size-4 shrink-0'
+                              />
+                              <span className='min-w-0 leading-relaxed [overflow-wrap:anywhere] break-words'>
+                                {label}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <ul className='text-muted-foreground flex flex-col gap-3 text-sm'>
+                        {features.map((label) => (
+                          <li key={label} className='flex items-start gap-2.5'>
+                            <Check
+                              aria-hidden='true'
+                              className='text-primary mt-0.5 size-4 shrink-0'
+                            />
+                            <span className='min-w-0 leading-relaxed [overflow-wrap:anywhere] break-words'>
+                              {label}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+
+                    <CardFooter className='flex-col gap-4 border-t-0 bg-transparent px-5 pt-0 pb-5'>
+                      <Separator />
+                      {reached ? (
+                        <Tooltip>
+                          <TooltipTrigger render={<div className='w-full' />}>
+                            <Button
+                              variant='outline'
+                              className='h-auto min-h-10 w-full py-2 whitespace-normal'
+                              disabled
+                            >
+                              {t('Limit Reached')}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t('Purchase limit reached')} ({count}/{limit})
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Button
+                          className='h-auto min-h-10 w-full rounded-full py-2 whitespace-normal'
+                          onClick={() => {
+                            setSelectedPlan(p)
+                            setPurchaseOpen(true)
+                          }}
                         >
-                          <Check className='text-primary h-3 w-3 shrink-0' />
-                          <span>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <Separator className='mb-3' />
-
-                    {reached ? (
-                      <Tooltip>
-                        <TooltipTrigger render={<div />}>
-                          <Button variant='outline' className='w-full' disabled>
-                            {t('Limit Reached')}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {t('Purchase limit reached')} ({count}/{limit})
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <Button
-                        variant='outline'
-                        className='w-full'
-                        onClick={() => {
-                          setSelectedPlan(p)
-                          setPurchaseOpen(true)
-                        }}
-                      >
-                        {t('Subscribe Now')}
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
+                          {t('Subscribe Now')}
+                        </Button>
+                      )}
+                    </CardFooter>
+                  </Card>
+                </article>
               )
             })}
           </div>

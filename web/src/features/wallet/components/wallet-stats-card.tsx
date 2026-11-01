@@ -16,87 +16,89 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, BarChart3, WalletCards } from 'lucide-react'
+import { WalletCards } from 'lucide-react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
+import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatQuota } from '@/lib/format'
+import { formatNumber, formatQuota } from '@/lib/format'
 
 import type { UserWalletData } from '../types'
 
 interface WalletStatsCardProps {
   user: UserWalletData | null
   loading?: boolean
+  actions?: ReactNode
 }
 
 export function WalletStatsCard(props: WalletStatsCardProps) {
   const { t } = useTranslation()
-  if (props.loading) {
-    return (
-      <div className='grid grid-cols-3 divide-x rounded-lg border'>
-        {['balance', 'usage', 'requests'].map((key) => (
-          <div key={key} className='min-w-0 px-2.5 py-2.5 sm:px-5 sm:py-4'>
-            <Skeleton className='h-3.5 w-full' />
-            <Skeleton className='mt-2 h-6 w-full sm:h-7' />
-            <Skeleton className='mt-1.5 hidden h-3.5 w-24 md:block' />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  const stats: {
-    label: string
-    value: string
-    description: string
-    icon: typeof WalletCards
-    tone: IconBadgeTone
-  }[] = [
-    {
-      label: t('Current Balance'),
-      value: formatQuota(props.user?.quota ?? 0),
-      description: t('Remaining quota'),
-      icon: WalletCards,
-      tone: 'success',
-    },
-    {
-      label: t('Total Usage'),
-      value: formatQuota(props.user?.used_quota ?? 0),
-      description: t('Total consumed quota'),
-      icon: BarChart3,
-      tone: 'info',
-    },
-    {
-      label: t('API Requests'),
-      value: (props.user?.request_count ?? 0).toLocaleString(),
-      description: t('Total requests made'),
-      icon: Activity,
-      tone: 'chart-4',
-    },
-  ]
+  const titleId = useId()
 
   return (
-    <div className='grid grid-cols-3 divide-x rounded-lg border'>
-      {stats.map((item) => (
-        <div key={item.label} className='min-w-0 px-2.5 py-2.5 sm:px-5 sm:py-4'>
-          <div className='flex items-center gap-1.5 sm:gap-2.5'>
-            <IconBadge tone={item.tone} size='stat'>
-              <item.icon />
-            </IconBadge>
-            <div className='text-muted-foreground truncate text-[11px] font-medium tracking-wider uppercase sm:text-xs'>
-              {item.label}
-            </div>
-          </div>
-
-          <div className='text-foreground mt-1.5 font-mono text-sm font-bold tracking-tight break-all tabular-nums sm:mt-2.5 sm:text-2xl'>
-            {item.value}
-          </div>
-          <div className='text-muted-foreground/60 mt-1 hidden text-xs md:block'>
-            {item.description}
-          </div>
+    <section
+      aria-labelledby={titleId}
+      aria-busy={props.loading}
+      className='bg-card text-card-foreground rounded-2xl border p-5 sm:p-6'
+    >
+      <div className='flex flex-wrap items-center justify-between gap-4'>
+        <div className='flex items-center gap-2.5'>
+          <IconBadge tone='success' size='stat'>
+            <WalletCards />
+          </IconBadge>
+          <h3 id={titleId} className='text-sm font-medium'>
+            {t('Current Balance')}
+          </h3>
         </div>
-      ))}
-    </div>
+        {props.actions && (
+          <div className='flex flex-wrap items-center gap-2'>
+            {props.actions}
+          </div>
+        )}
+      </div>
+
+      <div className='mt-6 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between'>
+        <div className='min-w-0'>
+          {props.loading ? (
+            <Skeleton className='h-12 w-48' />
+          ) : (
+            <div className='text-4xl font-semibold tracking-tight break-all tabular-nums sm:text-5xl'>
+              {formatQuota(props.user?.quota ?? 0)}
+            </div>
+          )}
+          <p className='text-muted-foreground mt-2 text-xs'>
+            {t('Remaining quota')}
+          </p>
+        </div>
+
+        <dl className='grid grid-cols-2 gap-6 border-t pt-4 sm:gap-10 sm:border-t-0 sm:pt-0'>
+          <div className='min-w-0'>
+            <dt className='text-muted-foreground text-xs'>
+              {t('Total Usage')}
+            </dt>
+            <dd className='mt-2 text-base font-medium break-all tabular-nums'>
+              {props.loading ? (
+                <Skeleton className='h-6 w-20' />
+              ) : (
+                formatQuota(props.user?.used_quota ?? 0)
+              )}
+            </dd>
+          </div>
+          <div className='min-w-0'>
+            <dt className='text-muted-foreground text-xs'>
+              {t('API Requests')}
+            </dt>
+            <dd className='mt-2 text-base font-medium break-all tabular-nums'>
+              {props.loading ? (
+                <Skeleton className='h-6 w-20' />
+              ) : (
+                formatNumber(props.user?.request_count ?? 0)
+              )}
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </section>
   )
 }

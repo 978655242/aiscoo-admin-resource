@@ -228,16 +228,16 @@ export function CheckinCalendarCard({
   if (isLoading) {
     return (
       <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-        <div className='p-6'>
-          <div className='flex items-start justify-between gap-4'>
-            <div className='flex items-center gap-3'>
-              <Skeleton className='h-10 w-10 rounded-xl' />
-              <div className='space-y-2'>
-                <Skeleton className='h-5 w-32' />
-                <Skeleton className='h-3 w-56' />
+        <div className='p-4'>
+          <div className='flex min-w-0 flex-col gap-3'>
+            <div className='flex min-w-0 items-center gap-3'>
+              <Skeleton className='size-7 shrink-0 rounded-lg' />
+              <div className='min-w-0 flex-1 space-y-2'>
+                <Skeleton className='h-5 w-32 max-w-full' />
+                <Skeleton className='h-3 w-full' />
               </div>
             </div>
-            <Skeleton className='h-9 w-28 rounded-md' />
+            <Skeleton className='h-8 w-full rounded-md' />
           </div>
         </div>
       </Card>
@@ -283,24 +283,30 @@ export function CheckinCalendarCard({
         </div>
       </Dialog>
 
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
+      <Card
+        data-card-hover='false'
+        className='@container/checkin min-w-0 gap-0 overflow-hidden py-0 shadow-none'
+      >
         {/* Header */}
-        <div className='border-b p-4 sm:p-6'>
-          <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4'>
-            <button
+        <div className='border-b p-4'>
+          <div className='flex flex-col gap-3 @min-[28rem]/checkin:flex-row @min-[28rem]/checkin:items-start @min-[28rem]/checkin:justify-between'>
+            <Button
               type='button'
-              className='flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left whitespace-normal outline-none'
+              variant='ghost'
+              className='h-auto min-w-0 flex-1 shrink justify-start gap-2.5 p-0 text-left whitespace-normal'
+              aria-expanded={!collapsed}
               onClick={() => setCollapsed((v) => !v)}
             >
-              <IconBadge tone='neutral' size='lg' className='sm:size-11'>
-                <CalendarDays
-                  className='h-4 w-4 sm:h-5 sm:w-5'
-                  strokeWidth={2}
-                />
+              <IconBadge
+                tone='neutral'
+                size='title'
+                className='size-7 sm:size-7'
+              >
+                <CalendarDays className='size-4' strokeWidth={2} />
               </IconBadge>
               <div className='min-w-0 flex-1'>
                 <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
-                  <h3 className='text-base font-semibold tracking-tight sm:text-lg'>
+                  <h3 className='text-sm font-semibold [overflow-wrap:anywhere]'>
                     {t('Daily Check-in')}
                   </h3>
                   {checkedToday && (
@@ -317,18 +323,18 @@ export function CheckinCalendarCard({
                     )}
                   </span>
                 </div>
-                <p className='text-muted-foreground mt-1 line-clamp-2 text-xs sm:text-sm'>
+                <p className='text-muted-foreground mt-1 text-xs font-normal [overflow-wrap:anywhere]'>
                   {checkedToday && todayAward !== undefined
                     ? `${t('Today')} +${formatQuotaWithCurrency(todayAward)}`
                     : t('Check in daily to receive random quota rewards')}
                 </p>
               </div>
-            </button>
+            </Button>
             <Button
               onClick={() => doCheckin()}
               disabled={checkinLoading || checkedToday}
               size='sm'
-              className='w-full shrink-0 sm:w-auto'
+              className='h-auto min-h-8 w-full shrink-0 py-1.5 whitespace-normal @min-[28rem]/checkin:w-auto'
             >
               {checkinButtonLabel}
             </Button>
@@ -339,7 +345,7 @@ export function CheckinCalendarCard({
           <>
             {/* Stats */}
             <div className='grid grid-cols-3 gap-px border-b'>
-              <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='bg-card min-w-0 p-3 text-center'>
                 <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
                   {checkinData?.stats?.total_checkins || 0}
                 </div>
@@ -347,7 +353,7 @@ export function CheckinCalendarCard({
                   {t('Total check-ins')}
                 </div>
               </div>
-              <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='bg-card min-w-0 p-3 text-center'>
                 <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
                   {formatQuotaWithCurrency(monthlyQuota, { digitsLarge: 0 })}
                 </div>
@@ -355,7 +361,7 @@ export function CheckinCalendarCard({
                   {t('This month')}
                 </div>
               </div>
-              <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='bg-card min-w-0 p-3 text-center'>
                 <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
                   {formatQuotaWithCurrency(
                     checkinData?.stats?.total_quota || 0,
@@ -371,7 +377,7 @@ export function CheckinCalendarCard({
             </div>
 
             {/* Calendar */}
-            <div className='p-4 sm:p-6'>
+            <div className='p-3 sm:p-4'>
               <div className='space-y-3 sm:space-y-4'>
                 {/* Month navigation */}
                 <div className='flex items-center justify-between'>

@@ -26,7 +26,7 @@ import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 
-import { RechargeFormCard } from '../components/recharge-form-card'
+import { RechargeFormContent } from '../components/recharge-form-content'
 
 const i18n = createInstance()
 
@@ -81,7 +81,7 @@ it.each([
   async ({ priceRatio, paid, saved, full }) => {
     render(
       <I18nextProvider i18n={i18n}>
-        <RechargeFormCard
+        <RechargeFormContent
           topupInfo={{
             enable_online_topup: true,
             enable_stripe_topup: false,
@@ -98,13 +98,9 @@ it.each([
           priceRatio={priceRatio}
           calculating={false}
           paymentLoading={null}
-          redemptionCode=''
-          redeeming={false}
           onSelectPreset={vi.fn()}
           onTopupAmountChange={vi.fn()}
           onPaymentMethodSelect={vi.fn()}
-          onRedemptionCodeChange={vi.fn()}
-          onRedeem={vi.fn()}
         />
       </I18nextProvider>
     )
