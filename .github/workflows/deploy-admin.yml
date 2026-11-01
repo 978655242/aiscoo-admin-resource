@@ -1,0 +1,263 @@
+name: Deploy admin test instance
+
+# Merging into release deploys to the single test host (magpie user, user-level systemd). See docs/admin-test-deployment.md.
+# Fixed ports (AGENTS.md, Production Deployment): admin HTTPS 8443, admin HTTP test entry 8080, website 80/443.
+on:
+  push:
+    branches: [release]
+  # Manual retry. Every job is gated on refs/heads/release, so it can only deploy the current release HEAD.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a running deployment. GitHub keeps one pending run per group, so a newer push replaces an
+# older pending run; the newest commit is the one that gets deployed.
+concurrency:
+  group: aiscoo-admin-deploy
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Test and build linux/amd64 artifact
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GOWORK: 'off'
+    outputs:
+      digest: ${{ steps.artifact.outputs.digest }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.4'
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            relaykit/go.sum
+            tokenkit/go.sum
+      - name: Test deployment contracts
+        run: python3 -I scripts/deploy/test_deploy.py
+      - name: Compute the version string
+        id: version
+        run: |
+          # The probe and the server compare against exactly this: "release-" + the first 12 hex digits of the commit.
+          printf 'version=release-%s\n' "${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+      - name: Build and test frontend
+        working-directory: web
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          bun install --frozen-lockfile
+          bun check -b
+          bun run test
+          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION="$VERSION" bun run build
+          test -s dist/index.html
+          grep -Eq '<script[^>]+src=' dist/index.html
+      - name: Test Go modules
+        run: |
+          go vet ./...
+          (cd relaykit && go vet ./...)
+          (cd tokenkit && go vet ./...)
+          make test
+      - name: Build linux/amd64 binary
+        id: artifact
+        # Same toolchain and flags as the Dockerfile (Go from go.mod = the Dockerfile's golang image, Bun 1.4.4, CGO off,
+        # PGO, greenteagc, the real web/dist embedded). Only the version differs: Dockerfile reads ./VERSION, this uses
+        # the release-<12 hex> string that the probe and the server check.
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+          GOEXPERIMENT: greenteagc
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifact"
+          out="$RUNNER_TEMP/artifact/aiscoo-admin"
+          go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" \
+            -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" \
+            -o "$out" .
+          test -s "$out"
+          # The binary must be static, amd64, and report the exact version string.
+          if readelf -l "$out" | grep -q INTERP; then echo 'binary is dynamically linked' >&2; exit 1; fi
+          [[ $(readelf -h "$out" | sed -n 's/^ *Machine: *//p') == *X86-64* ]] || { echo 'binary is not x86-64' >&2; exit 1; }
+          [[ $(env -i PATH=/usr/bin:/bin "$out" --version) == "$VERSION" ]] || { echo 'binary does not report the expected version' >&2; exit 1; }
+          digest=$(sha256sum "$out" | cut -d ' ' -f1)
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aiscoo-admin-linux-amd64
+          path: ${{ runner.temp }}/artifact/aiscoo-admin
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy:
+    name: Deploy to the test host and accept
+    needs: build
+    if: github.ref == 'refs/heads/release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      uploaded: ${{ steps.upload.outputs.uploaded }}
+      acceptance: ${{ steps.probe.outputs.acceptance }}
+      tls: ${{ steps.probe.outputs.tls }}
+      http8080: ${{ steps.http_probe.outcome }}
+    steps:
+      - name: Checkout exact commit (for the probe script and the entry hash)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aiscoo-admin-linux-amd64
+          path: ${{ runner.temp }}/artifact
+      - name: Verify artifact digest and release HEAD before deploying
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          actual=$(sha256sum "$RUNNER_TEMP/artifact/aiscoo-admin" | cut -d ' ' -f1)
+          [[ $EXPECTED_DIGEST =~ ^[0-9a-f]{64}$ && $actual == "$EXPECTED_DIGEST" ]] || { echo 'Artifact digest differs from the build job; refusing to deploy' >&2; exit 1; }
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release" --jq '.object.sha')
+          [[ $latest == "$GITHUB_SHA" ]] || { echo "release moved to a newer commit; refusing to deploy $GITHUB_SHA" >&2; exit 1; }
+      - name: Upload to the test host over SSH (restricted key)
+        id: upload
+        timeout-minutes: 25
+        env:
+          DEPLOY_TARGET: ${{ secrets.ADMIN_DEPLOY_TARGET }}
+          DEPLOY_KEY: ${{ secrets.ADMIN_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ADMIN_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ $DEPLOY_TARGET =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+$ ]] || { echo 'ADMIN_DEPLOY_TARGET is missing or malformed (expected user@host)' >&2; exit 1; }
+          [[ -n $DEPLOY_KEY && -n $KNOWN_HOSTS ]] || { echo 'ADMIN_DEPLOY_SSH_KEY or ADMIN_DEPLOY_KNOWN_HOSTS is missing' >&2; exit 1; }
+          ssh_dir="$RUNNER_TEMP/ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          artifact="$RUNNER_TEMP/artifact/aiscoo-admin"
+          digest=$(sha256sum "$artifact" | cut -d ' ' -f1)
+          size=$(stat -c %s "$artifact")
+          # Hash of the entry scripts and unit in this checkout. The server compares it with its installed copy and
+          # refuses a stale one (the server copy is the authority; CI cannot replace it).
+          entry_hash=$(bash scripts/deploy/entry-hash.sh scripts/deploy scripts/deploy/aiscoo-admin.service)
+          echo "entry hash (compare with the server's: ~/aiscoo-admin/bin/entry-hash.sh ~/aiscoo-admin/bin ~/.config/systemd/user/aiscoo-admin.service): $entry_hash"
+          # The remote side only reads this header and the bytes that follow; it takes no path or command from us.
+          { printf 'deploy %s %s %s %s %s %s\n' "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT" "$digest" "$size" "$entry_hash"; cat "$artifact"; } |
+            ssh -T -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+              "$DEPLOY_TARGET"
+          rm -rf "$ssh_dir"
+          printf 'uploaded=true\n' >> "$GITHUB_OUTPUT"
+      - name: Public acceptance probe
+        id: probe
+        env:
+          # Fixed by AGENTS.md: admin HTTPS is 8443; 443 is the official website and must NOT return the admin service.
+          ADMIN_ORIGIN: 'https://112.124.202.60:8443'
+          # fallback (default): verify the certificate chain first; only if the chain does not verify on this runner
+          # (for example the Let's Encrypt IP-certificate root is missing from the runner's CA store) continue unverified,
+          # loudly, and report it in the notification. Set the repository variable ADMIN_PROBE_TLS=strict to forbid that.
+          AISCOO_PROBE_TLS: ${{ vars.ADMIN_PROBE_TLS || 'fallback' }}
+          AISCOO_PROBE_CLOSED_PORTS: '3000,5432,8005'
+          # 443 is the official website: its /api/status must not return the admin JSON.
+          AISCOO_PROBE_NOT_ADMIN_ORIGINS: 'https://112.124.202.60'
+          # Optional. Without both, the probe runs only the unauthenticated checks and reports "basic".
+          # The probe never sends the token over plain HTTP or over a TLS connection whose chain was not verified.
+          AISCOO_PROBE_TOKEN: ${{ secrets.ADMIN_PROBE_TOKEN }}
+          AISCOO_PROBE_USER_ID: ${{ secrets.ADMIN_PROBE_USER_ID }}
+        run: |
+          set -euo pipefail
+          python3 -I scripts/deploy/probe.py "$ADMIN_ORIGIN" "$GITHUB_SHA" | tee "$RUNNER_TEMP/probe.out"
+          mode=$(sed -n 's/^ACCEPTANCE: //p' "$RUNNER_TEMP/probe.out" | tail -n 1)
+          tls=$(sed -n 's/^TLS: //p' "$RUNNER_TEMP/probe.out" | tail -n 1)
+          [[ $mode == full || $mode == basic ]] || { echo 'probe did not report an acceptance level' >&2; exit 1; }
+          [[ $tls == verified || $tls == UNVERIFIED ]] || { echo 'probe did not report the TLS state' >&2; exit 1; }
+          if [[ $tls == UNVERIFIED ]]; then echo '::warning::Public acceptance ran with an UNVERIFIED TLS chain (certificate not verified on this runner)'; fi
+          printf 'acceptance=%s\ntls=%s\n' "$mode" "$tls" >> "$GITHUB_OUTPUT"
+      - name: Supplementary probe on the HTTP test entry (8080)
+        id: http_probe
+        # Supplementary only: 8443 is the acceptance entry. A failure here is reported in the notification
+        # (the step outcome is passed on) but does not by itself fail the release; it is never silently dropped.
+        continue-on-error: true
+        env:
+          AISCOO_PROBE_ALLOW_HTTP: '1'
+        run: |
+          set -euo pipefail
+          # Unauthenticated, no token: 8080 is plain HTTP and for test data only.
+          python3 -I scripts/deploy/probe.py 'http://112.124.202.60:8080' "$GITHUB_SHA"
+      - name: Re-check release HEAD after deploying
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release" --jq '.object.sha')
+          # No automatic rollback: the new binary may already have migrated the database.
+          [[ $latest == "$GITHUB_SHA" ]] || { echo "release moved to $latest while deploying $GITHUB_SHA; this run is superseded and not reported as a success. The newer run will deploy the new commit." >&2; exit 1; }
+
+  notify:
+    name: Notify Feishu
+    needs: [build, deploy]
+    # A cancelled workflow (for example a pending run superseded by a newer push) sends nothing.
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Send result (a notification problem is only a warning)
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.ADMIN_FEISHU_WEBHOOK }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          UPLOADED: ${{ needs.deploy.outputs.uploaded }}
+          ACCEPTANCE: ${{ needs.deploy.outputs.acceptance }}
+          HTTP8080: ${{ needs.deploy.outputs.http8080 }}
+          TLS_STATE: ${{ needs.deploy.outputs.tls }}
+        run: |
+          set -uo pipefail
+          # Success only when build and deploy both succeeded (deploy includes the 8443 + 443 probe and the post-deploy HEAD check)
+          # and the probe reported an acceptance level. Otherwise a failure naming the stage.
+          if [[ $BUILD_RESULT == success && $DEPLOY_RESULT == success && ( $ACCEPTANCE == full || $ACCEPTANCE == basic ) ]]; then
+            text="aiscoo-admin 测试环境发布成功"
+            if [[ $ACCEPTANCE == basic ]]; then level='公网基础验收通过（未做登录态业务检查）'; else level='公网验收通过（含登录态只读检查）'; fi
+            level+="；验收入口 https://112.124.202.60:8443，443 未返回后台"
+            if [[ $HTTP8080 == success ]]; then level+="，8080 补充检查通过"; else level+="；注意：8080 补充检查未通过（$HTTP8080），不影响主验收"; fi
+            [[ $TLS_STATE != UNVERIFIED ]] || level+="。注意：TLS 链未校验（runner 不信任该证书链，验收按降级路径完成）"
+          else
+            text="aiscoo-admin 测试环境发布失败"
+            if [[ $BUILD_RESULT != success ]]; then stage="构建/测试阶段 ($BUILD_RESULT)"
+            elif [[ $UPLOADED != true ]]; then stage="部署阶段：核对或上传到服务器未完成 ($DEPLOY_RESULT)"
+            elif [[ -z $ACCEPTANCE ]]; then stage="验收阶段：服务器已接收，公网验收未通过 ($DEPLOY_RESULT)"
+            else stage="验收通过之后：release HEAD 复核未通过，本次已被更新的提交顶替 ($DEPLOY_RESULT)"; fi
+            level="失败阶段: $stage"
+            [[ $TLS_STATE != UNVERIFIED ]] || level+="。注意：TLS 链未校验"
+          fi
+          if [[ ! $FEISHU_WEBHOOK =~ ^https://open\.(feishu\.cn|larksuite\.com)/open-apis/bot/v2/hook/[A-Za-z0-9-]+$ ]]; then
+            echo '::warning::Feishu webhook secret is missing or malformed; no notification was sent'
+            exit 0
+          fi
+          payload=$(jq -nc --arg text "$text"$'\n'"$level"$'\n'"提交: ${GITHUB_SHA:0:12}"$'\n'"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{msg_type:"text",content:{text:$text}}')
+          # The webhook goes through curl's stdin config so it never appears in process arguments.
+          if ! response=$(printf 'url = "%s"\n' "$FEISHU_WEBHOOK" | curl --config - --fail --silent --show-error --max-time 15 -H 'Content-Type: application/json' --data "$payload" 2>&1); then
+            echo '::warning::Feishu notification request failed'
+            exit 0
+          fi
+          printf '%s' "$response" | jq -e '(.code // .StatusCode) == 0' >/dev/null 2>&1 || echo '::warning::Feishu rejected the notification'
+          exit 0

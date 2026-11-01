@@ -1,0 +1,36 @@
+# Installed by setup-magpie.sh as ~/.config/systemd/user/aiscoo-admin.service
+[Unit]
+Description=aiscoo admin (test instance)
+# The application reaches the outside world only through the proxy that the user service aiscoo-xray provides.
+# A user unit cannot be ordered after system units such as postgresql.service; bin/prestart.sh waits for the database.
+After=aiscoo-xray.service
+Wants=aiscoo-xray.service
+
+[Service]
+Type=simple
+# The database DSN and the other secrets live only in this 0600 file, never in the repository or this unit.
+# bin/prestart.sh validates its format (never printing values) before every start.
+EnvironmentFile=%h/aiscoo-admin/etc/app.env
+# Same fixed environment as the previous system unit's launcher. The user manager's environment is NOT cleared.
+Environment=HOME=%h/aiscoo-admin/state
+Environment=TMPDIR=%h/aiscoo-admin/state/tmp
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Never enable the pprof listener (it binds 0.0.0.0:8005), and never let CRYPTO_SECRET diverge from SESSION_SECRET
+# (the application falls back to SESSION_SECRET when it is unset), whatever the manager environment or app.env says.
+UnsetEnvironment=ENABLE_PPROF CRYPTO_SECRET NODE_NAME
+UMask=0077
+WorkingDirectory=%h/aiscoo-admin/state/data
+# Waits up to 60 s for PostgreSQL on 127.0.0.1:5432, then exits non-zero (Restart=no, so no restart loop).
+ExecStartPre=%h/aiscoo-admin/bin/prestart.sh
+ExecStart=%h/aiscoo-admin/current --port 3000 --log-dir %h/aiscoo-admin/state/logs
+TimeoutStartSec=90
+TimeoutStopSec=130
+# A failed start (for example a failed migration) must not loop. Same semantics as the previous system unit.
+Restart=no
+NoNewPrivileges=yes
+# Deliberately NOT set: ProtectSystem=, ProtectHome=, PrivateTmp=. In a user manager they need unprivileged user
+# namespaces, which Ubuntu 24.04 may restrict through AppArmor (not verified on this host). If they cannot be
+# set up, the service fails to start with status 226/NAMESPACE.
+
+[Install]
+WantedBy=default.target
