@@ -234,6 +234,16 @@ func SetApiRouter(router *gin.Engine) {
 		zenAdminRoute.GET("/users/:id/authorization", controller.AdminGetZenAuthorization)
 		zenAdminRoute.POST("/users/:id/authorization", controller.AdminMutateZenAuthorization)
 
+		// Desktop in-app update: the anonymous manifest the desktop client polls,
+		// and the root-only endpoints that register releases and control rollout.
+		// A release reaches every installed client, so only root may publish one.
+		apiRouter.GET("/v1/releases/electron/manifest", middleware.DesktopReleaseManifestRateLimit(), controller.GetDesktopReleaseManifest)
+		desktopReleaseAdminRoute := apiRouter.Group("/v1/admin/releases")
+		desktopReleaseAdminRoute.Use(middleware.RootAuth(), middleware.DisableCache())
+		desktopReleaseAdminRoute.GET("", controller.AdminListDesktopReleases)
+		desktopReleaseAdminRoute.POST("", anonymousRequestBodyLimit, controller.AdminCreateDesktopRelease)
+		desktopReleaseAdminRoute.PATCH("/:id", anonymousRequestBodyLimit, controller.AdminUpdateDesktopRelease)
+
 		// Subscription payment callbacks (no auth)
 		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
