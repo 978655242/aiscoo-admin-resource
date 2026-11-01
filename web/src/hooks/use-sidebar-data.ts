@@ -21,6 +21,7 @@ import {
   Box,
   ClipboardList,
   CreditCard,
+  Download,
   FileText,
   Key,
   LayoutDashboard,
@@ -149,6 +150,13 @@ export function useSidebarData(): SidebarData {
             title: t('Task Plugins'),
             url: '/task-plugins',
             icon: PlugZap,
+            requiredRole: ROLE.SUPER_ADMIN,
+          },
+          // XCODE: Aiscoo 桌面版本独立管理入口，复用 root 管理员权限。
+          {
+            title: t('Version Management'),
+            url: '/desktop-releases',
+            icon: Download,
             requiredRole: ROLE.SUPER_ADMIN,
           },
           {
