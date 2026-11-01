@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CherryStudio } from '@lobehub/icons'
+import { ClaudeCode, Codex } from '@lobehub/icons'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import openCodeLogo from '@/assets/brand-icons/opencode.svg'
 import { Button } from '@/components/ui/button'
 
 import { HeroEqualizer } from '../hero-equalizer'
@@ -30,20 +31,6 @@ interface HeroProps {
   className?: string
   isAuthenticated?: boolean
 }
-
-// Stylized three-dots indicator representing "More"
-const MoreIcon = () => (
-  <svg
-    className='text-muted-foreground/60 group-hover:text-foreground size-6 shrink-0 transition-colors'
-    viewBox='0 0 24 24'
-    fill='none'
-    xmlns='http://www.w3.org/2000/svg'
-  >
-    <circle cx='6' cy='12' r='2' fill='currentColor' />
-    <circle cx='12' cy='12' r='2' fill='currentColor' />
-    <circle cx='18' cy='12' r='2' fill='currentColor' />
-  </svg>
-)
 
 export function Hero(props: HeroProps) {
   const { t } = useTranslation()
@@ -160,43 +147,36 @@ export function Hero(props: HeroProps) {
             {t('Supported Applications')}
           </span>
           <a
-            href='https://cherry-ai.com'
+            href='https://claude.com/product/claude-code'
             target='_blank'
             rel='noopener noreferrer'
             className='group flex items-center gap-2.5 rounded-full border border-[rgba(204,238,244,0.17)] bg-[rgba(221,239,243,0.045)] px-4 py-2 text-sm text-[#d4dce2] transition-colors hover:bg-[rgba(221,239,243,0.13)] hover:text-white'
           >
-            <CherryStudio.Color size={20} className='shrink-0' />
-            <span>Cherry Studio</span>
+            <ClaudeCode.Color size={20} aria-hidden='true' />
+            <span>Claude Code</span>
           </a>
           <a
-            href='https://ccswitch.io'
+            href='https://openai.com/codex/'
+            target='_blank'
+            rel='noopener noreferrer'
+            className='group flex items-center gap-2.5 rounded-full border border-[rgba(204,238,244,0.17)] bg-[rgba(221,239,243,0.045)] px-4 py-2 text-sm text-[#d4dce2] transition-colors hover:bg-[rgba(221,239,243,0.13)] hover:text-white'
+          >
+            <Codex size={20} aria-hidden='true' />
+            <span>Codex</span>
+          </a>
+          <a
+            href='https://opencode.ai/'
             target='_blank'
             rel='noopener noreferrer'
             className='group flex items-center gap-2.5 rounded-full border border-[rgba(204,238,244,0.17)] bg-[rgba(221,239,243,0.045)] px-4 py-2 text-sm text-[#d4dce2] transition-colors hover:bg-[rgba(221,239,243,0.13)] hover:text-white'
           >
             <img
-              src='https://ccswitch.io/favicon.png'
-              alt='CC Switch'
-              className='size-5 shrink-0 rounded-md object-contain'
-              onError={(e) => {
-                // Fall back to a text avatar when the remote favicon is unreachable.
-                e.currentTarget.style.display = 'none'
-                const fallback = e.currentTarget.nextSibling as HTMLElement
-                if (fallback) fallback.style.display = 'flex'
-              }}
+              src={openCodeLogo}
+              alt=''
+              className='size-5 shrink-0 object-contain'
             />
-            <span
-              style={{ display: 'none' }}
-              className='size-5 shrink-0 items-center justify-center rounded-md bg-cyan-400/15 text-[9px] font-bold text-cyan-300'
-            >
-              CC
-            </span>
-            <span>CC Switch</span>
+            <span>Open Code</span>
           </a>
-          <div className='flex cursor-default items-center gap-2 rounded-full border border-[rgba(204,238,244,0.17)] bg-[rgba(221,239,243,0.045)] px-4 py-2 text-sm text-[#a0b4c2]'>
-            <MoreIcon />
-            <span>{t('More Apps')}</span>
-          </div>
         </div>
       </div>
 
