@@ -32,10 +32,16 @@ export function readZenPlanDisplayContext(): ZenPlanDisplayContext | null {
     return null
   }
   const data = document.documentElement.dataset
-  const theme = data.zenPlanTheme
-  const locale = data.zenPlanLocale
-  const initialAudience = data.zenPlanAudience
-  const fontSize = data.zenPlanFontSize
+  // ZEN: 旧版同路径脚本可能仍在缓存；整组读取旧字段，避免与新字段拼接。
+  const legacy =
+    data.zenPlanTheme === undefined &&
+    data.zenPlanLocale === undefined &&
+    data.zenPlanAudience === undefined &&
+    data.zenPlanFontSize === undefined
+  const theme = legacy ? data.xcodePlanTheme : data.zenPlanTheme
+  const locale = legacy ? data.xcodePlanLocale : data.zenPlanLocale
+  const initialAudience = legacy ? data.xcodePlanAudience : data.zenPlanAudience
+  const fontSize = legacy ? data.xcodePlanFontSize : data.zenPlanFontSize
   if (
     (theme !== 'light' && theme !== 'dark') ||
     (locale !== 'zh-CN' && locale !== 'en-US') ||

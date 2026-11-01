@@ -421,6 +421,7 @@ web-handoff 是 60 秒、单次、同用户/SID/用途绑定的 AuthFlow。消�
 - 仅显式同 `(group_key,currency)` 的模板分组；相同组名称/类型/权益冲突退回全部原生 ID，重复周期 slot 展开冲突 SKU。仅 month/1、month/3、month/12、year/1 属月/季/年；day/hour/custom 不换算日历月。缺周期不借用另一模板；0价不推断 trial，不新增试用历史。不写死体验/Lite/Pro/Max 或截图折扣。
 - 价格使用模板自身 currency/price_amount，与 quota 展示汇率无关；仅可比较的同组正价月基准派生月均参考价/真实折扣，周期总参考价始终保留。精确十进制计算、最终舍入，缺基准/不同权益预算/冲突/0价不显示折扣；有限 custom 重置无法仅凭静态模板证明有效期内同月预算，保留总价/月均但不显示折扣。CTA 仅本页管理员说明，不写订单、支付、申请；遵守 §5.1，active/exhausted 同 ID renew 不补当期额度、另一 ID replace 无时间折算/额度结转；unassigned/revoked 重新 grant；expired 同 ID renew 新建实例采用当前模板预算，其他 ID 重新 grant。
 - 只读 Cookie、认证 DTO、AuthFlow 和 handoff URL 不改。Desktop 在已准入 Native 非持久分区写 `xcode_plan_display_v1` 无秘密 UI session Cookie：host-only、Path=/xcode/plans、SameSite=Strict、HTTPS Secure、httpOnly=false；只含 version=1、resolved light/dark、zh-CN/en-US、personal/team、整数12–20的 uiFontSizePx，无身份/SID/code/token/权限。首帧由同源同步 head Bootstrap 读取，在 CSS/App bundle 前应用主题/语言/字号和初始分类；不增加内联 JS、preload、通用函数桥或认证 Bootstrap 接口。坏 UI Cookie 只能影响展示，不获得权限。
+- 兼容已发布客户端的精确资源白名单，Bootstrap 使用 `/xcode-plan-display.js`；网页初始默认浅色，有效展示上下文须在首帧和 React 挂载后维持桌面选择的浅色或深色，浏览器存储不可用时也适用。深色套餐卡片中的辅助正文与卡片背景对比度至少为 4.5:1。旧版同路径脚本可能仍在浏览器缓存，其完整 `data-xcode-plan-*` 展示投影按与新 `data-zen-plan-*` 完全相同的校验规则读取，不得混合两组字段。没有有效上下文的套餐页及普通后台保持浅色，不读取旧主题偏好。桌面以完整文档导航进入套餐页，主题变化通过重新创建 guest 和展示上下文生效。
 - 页面移除重复后台标题/主题控件/大授权面板，使用原版分类、周期、等高卡片和底部按钮；团队分类固定真实不支持，无组织/支付业务。非viewer页面和官方升级认证不变。Native shell/Web只保留一层内容限宽和留白，实际 guest 按父窗口 zoomFactor 同步；基准宽屏真实四档配置才验收四列首屏，不用未配置目录伪造四档。
 
 ### 9.2 只读套餐页法律文档入口（补充）

@@ -41,10 +41,10 @@ let bootstrap: Script
 beforeAll(async () => {
   bootstrap = new Script(
     await readFile(
-      resolve(process.cwd(), 'public/zen-plan-display.js'),
+      resolve(process.cwd(), 'public/xcode-plan-display.js'),
       'utf8'
     ),
-    { filename: 'zen-plan-display.js' }
+    { filename: 'xcode-plan-display.js' }
   )
 })
 beforeEach(() => {
@@ -71,6 +71,10 @@ afterEach(() => {
   delete document.documentElement.dataset.zenPlanTheme
   delete document.documentElement.dataset.zenPlanLocale
   delete document.documentElement.dataset.zenPlanFontSize
+  delete document.documentElement.dataset.xcodePlanAudience
+  delete document.documentElement.dataset.xcodePlanTheme
+  delete document.documentElement.dataset.xcodePlanLocale
+  delete document.documentElement.dataset.xcodePlanFontSize
 })
 
 const display = {
@@ -145,9 +149,9 @@ function expectNativeFrame(dom: Document, fontSize = 14) {
   })
 }
 
-function applyNativeBootstrapToPage() {
+function applyNativeBootstrapToPage(context = display) {
   window.history.replaceState({}, '', '/xcode/plans')
-  document.cookie = `${cookieFor(display)}; Path=/xcode/plans`
+  document.cookie = `${cookieFor(context)}; Path=/xcode/plans`
   document.documentElement.className = 'dark existing-class'
   document.documentElement.lang = 'en-US'
   document.documentElement.style.cssText =
@@ -166,6 +170,32 @@ function ThemeReadback() {
 }
 
 describe('Zen head display bootstrap', () => {
+  it('applies the desktop-approved bootstrap in the actual HTML script order', async () => {
+    const html = await readFile(resolve(process.cwd(), 'index.html'), 'utf8')
+    const dom = new DOMParser().parseFromString(html, 'text/html')
+    Object.defineProperty(dom, 'cookie', {
+      get: () => cookieFor({ ...display, theme: 'dark' }),
+    })
+    const context = createContext({
+      document: dom,
+      location: new URL('https://native.example/xcode/plans'),
+      localStorage,
+    })
+    const scripts = dom.head.querySelectorAll('script')
+    const source = dom.head.querySelector('script[src]')
+    expect(source?.getAttribute('src')).toBe('/xcode-plan-display.js')
+    for (const script of scripts) {
+      if (script.getAttribute('src') === '/xcode-plan-display.js') {
+        bootstrap.runInContext(context)
+      } else if (!script.hasAttribute('src')) {
+        new Script(script.textContent ?? '').runInContext(context)
+      }
+    }
+    expect(dom.documentElement.classList.contains('dark')).toBe(true)
+    expect(dom.documentElement.classList.contains('light')).toBe(false)
+    expect(dom.documentElement.style.colorScheme).toBe('dark')
+  })
+
   it.each([
     '/xcode/plans',
     '/xcode/plans?handoff=short-code',
@@ -328,6 +358,71 @@ describe('Zen head display bootstrap', () => {
     render(createElement(ThemeProvider, null, createElement(ThemeReadback)))
     expect(screen.getByLabelText('Resolved theme')).toHaveTextContent('light')
     expectNativeFrame(document)
+  })
+
+  it('keeps the dark Native theme after ThemeProvider mounts when Storage is blocked', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage blocked', 'SecurityError')
+    })
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('Storage blocked', 'SecurityError')
+    })
+    applyNativeBootstrapToPage({ ...display, theme: 'dark' })
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.classList.contains('light')).toBe(false)
+    render(createElement(ThemeProvider, null, createElement(ThemeReadback)))
+    expect(screen.getByLabelText('Resolved theme')).toHaveTextContent('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(document.documentElement.classList.contains('light')).toBe(false)
+    expect(document.documentElement.style.colorScheme).toBe('dark')
+  })
+
+  it('keeps the normal admin light despite a legacy dark preference', () => {
+    window.history.replaceState({}, '', '/dashboard')
+    document.documentElement.className = 'dark'
+    render(createElement(ThemeProvider, null, createElement(ThemeReadback)))
+    expect(screen.getByLabelText('Resolved theme')).toHaveTextContent('light')
+    expect(document.documentElement.classList.contains('light')).toBe(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  it('falls back to light when the Native display context is invalid', () => {
+    applyNativeBootstrapToPage({ ...display, theme: 'dark' })
+    delete document.documentElement.dataset.zenPlanLocale
+    render(createElement(ThemeProvider, null, createElement(ThemeReadback)))
+    expect(screen.getByLabelText('Resolved theme')).toHaveTextContent('light')
+    expect(document.documentElement.classList.contains('light')).toBe(true)
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(document.documentElement.style.colorScheme).toBe('light')
+  })
+
+  it('retains the dark theme and preferences from an older cached bootstrap', () => {
+    window.history.replaceState({}, '', '/xcode/plans')
+    const root = document.documentElement
+    root.className = 'dark'
+    root.dataset.xcodePlanTheme = 'dark'
+    root.dataset.xcodePlanLocale = 'en-US'
+    root.dataset.xcodePlanAudience = 'team'
+    root.dataset.xcodePlanFontSize = '18'
+    expect(readZenPlanDisplayContext()).toEqual({
+      theme: 'dark',
+      locale: 'en-US',
+      initialAudience: 'team',
+      uiFontSizePx: 18,
+    })
+    render(createElement(ThemeProvider, null, createElement(ThemeReadback)))
+    expect(screen.getByLabelText('Resolved theme')).toHaveTextContent('dark')
+    expect(root.classList.contains('dark')).toBe(true)
+    expect(root.classList.contains('light')).toBe(false)
+  })
+
+  it('does not combine incomplete legacy and current display projections', () => {
+    window.history.replaceState({}, '', '/xcode/plans')
+    document.documentElement.dataset.zenPlanTheme = 'dark'
+    document.documentElement.dataset.xcodePlanLocale = 'en-US'
+    document.documentElement.dataset.xcodePlanAudience = 'team'
+    document.documentElement.dataset.xcodePlanFontSize = '18'
+    expect(readZenPlanDisplayContext()).toBeNull()
   })
 
   it('initializes actual i18n from Native Chinese DOM when English Storage cannot be read or written', async () => {
