@@ -13,6 +13,28 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - `feat/<topic>` branches are for daily iteration, cut from `release`. When the work is done and verified, merge back into `release` and delete the branch.
 - Merge direction is one-way: `upstream/main` → `main` → `release` ← `feat/*`. Never merge `release` into `main` or upstream, and never rebase shared branches.
 
+## Production Deployment (fixed conventions)
+
+The production server is an Alibaba Cloud Lightweight Application Server (Hangzhou), public IP `112.124.202.60`, no domain yet. The official website (`aiscoo-officialsite`) and this admin service share the same machine and IP and are told apart **by port only. These ports are fixed and must not be swapped**:
+
+| Service | Address | Notes |
+|---|---|---|
+| Official website | `http://112.124.202.60/` (80) and `https://112.124.202.60/` (443) | Other repository. Nginx `default_server`. |
+| Admin HTTPS | `https://112.124.202.60:8443/` | This service. **Always 8443, never 443.** |
+| Admin HTTP test entry | `http://112.124.202.60:8080/` | Test data only. |
+| Application | `127.0.0.1:3000` | Never exposed. Host firewall table `inet aiscoo_isolation` drops non-loopback 3000, 5432 and 8005. |
+| PostgreSQL | `127.0.0.1:5432` | Database `aiscoo_admin`, loopback only. |
+| Magpie model gateway | `127.0.0.1:3425` | The admin service reaches it as an OpenAI-compatible upstream. |
+
+- 443 belongs to the website. No config, script, doc or acceptance check may put the admin service on 443.
+- Both HTTPS listeners share one Let's Encrypt **IP certificate** (6-day lifetime, renewed by `aiscoo-certbot-renew.timer` through HTTP-01 on port 80, webroot `/var/lib/aiscoo-acme/webroot`). Port 80 must stay reachable and `/.well-known/acme-challenge/` must not be redirected or blocked. The certificate has no port in its name, so 443 and 8443 can use the same one.
+- Run `nginx -t` before every reload. A failed reload leaves the old certificate in place after renewal and it expires in 6 days.
+- Application origin variables must carry the port: `XCODE_PUBLIC_ORIGIN` and `SESSION_COOKIE_TRUSTED_URL` are `https://112.124.202.60:8443`. Any generated `app.env`, systemd unit, script, test or doc that sets them must use that value. Clients that logged in through the old portless origin must sign in again.
+- Admin HTTPS responses must hide every `X-Magpie-*` upstream header (`/etc/nginx/aiscoo-admin-hide-magpie-headers.inc`). Registration stays closed and `/api/setup`, `/api/user/register` stay blocked at Nginx.
+- Do not send real user data or real provider keys over the plain-HTTP `:8080` entry.
+- Deployment acceptance for this service must check that `:8443` serves the admin page and that `https://112.124.202.60/` does **not** return the admin `/api/status` JSON.
+- Model prices are configured per model in the admin settings (billing expressions) and must match each vendor's official price; the first write also persists the pricing keys, so after an upgrade re-check them.
+
 ## Tech Stack
 
 - **Backend**: Go 1.26 for the root module and `tokenkit/`, Go 1.25.1 for `relaykit/` (see each module’s `go.mod`), Gin web framework, GORM v2 ORM
