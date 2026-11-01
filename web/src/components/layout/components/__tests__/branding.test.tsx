@@ -138,11 +138,6 @@ test('configured footer content retains the project attribution', async () => {
   })
   renderBrandPage('footer')
   expect(await screen.findByText('Research Hub support')).toBeVisible()
-  expect(
-    screen.getByText(/Frontend design and development by New API contributors/)
-  ).toBeVisible()
-  expect(screen.getByRole('link', { name: 'New API' })).toHaveAttribute(
-    'href',
-    'https://github.com/QuantumNous/new-api'
-  )
+  expect(screen.getByText(/aiscoo\./)).toBeVisible()
+  expect(document.body).not.toHaveTextContent(/New API/i)
 })

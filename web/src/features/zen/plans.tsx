@@ -123,14 +123,7 @@ export function ZenPlans() {
           )}
         </div>
         <footer className='zen-plan-footer text-ui-sm'>
-          aiscoo ·{' '}
-          <a
-            href='https://github.com/QuantumNous/new-api'
-            target='_blank'
-            rel='noopener noreferrer'
-          >
-            Frontend design and development by New API contributors.
-          </a>
+          &copy; {new Date().getFullYear()} aiscoo
           <TermsFooter
             variant='links'
             className='mt-2 text-start text-inherit'
