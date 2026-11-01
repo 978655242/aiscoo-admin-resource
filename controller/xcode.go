@@ -221,6 +221,35 @@ func xcodeAuthenticationError(c *gin.Context, err error) {
 	xcodeAPIError(c, status, code, http.StatusText(status))
 }
 
+func SubmitXCodeRevokeOperation(c *gin.Context) {
+	xcodeRevokeOperation(c, false)
+}
+
+func QueryXCodeRevokeOperation(c *gin.Context) {
+	xcodeRevokeOperation(c, true)
+}
+
+func xcodeRevokeOperation(c *gin.Context, query bool) {
+	c.Header("Cache-Control", "no-store")
+	var input service.XCodeRevokeOperationRequest
+	if err := common.DecodeJson(c.Request.Body, &input); err != nil {
+		xcodeAuthenticationError(c, service.ErrRefreshTokenInvalid)
+		return
+	}
+	var result string
+	var err error
+	if query {
+		result, err = service.QueryXCodeRevokeOperation(input)
+	} else {
+		result, err = service.SubmitXCodeRevokeOperation(input)
+	}
+	if err != nil {
+		xcodeAuthenticationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"result": result}})
+}
+
 func xcodeAuthorizationOrigin(c *gin.Context) (string, bool) {
 	if !common.XCodeIntegrationEnabled() {
 		xcodeAPIError(c, http.StatusNotFound, "XCODE_AUTHORIZATION_DISABLED", "XCode authorization is disabled")

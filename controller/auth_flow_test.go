@@ -1,17 +1,20 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1144,7 +1147,7 @@ func TestOAuthBindIgnoresLegacyGitHubUsernames(t *testing.T) {
 func setupXCodeAuthTest(t *testing.T) (*model.User, service.AuthIdentity) {
 	t.Helper()
 	user, identity := setupSecurityEnrollmentTest(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.Token{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Token{}, &model.XCodeRevokeOperation{}))
 	return user, identity
 }
 
@@ -1610,7 +1613,7 @@ func TestXCodeExchangeRollsBackAllIssuanceFacts(t *testing.T) {
 		})
 	}
 }
-func enableXCodeAuthTestRedis(t *testing.T, userID int) {
+func enableXCodeAuthTestRedis(t *testing.T, userID int) *miniredis.Miniredis {
 	t.Helper()
 	server := miniredis.RunT(t)
 	previous := common.RDB
@@ -1621,6 +1624,7 @@ func enableXCodeAuthTestRedis(t *testing.T, userID int) {
 		require.NoError(t, client.Close())
 	})
 	require.NoError(t, model.PublishUserAuthCache(userID))
+	return server
 }
 
 func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
@@ -2011,6 +2015,860 @@ func TestXCodeLogoutRequiresCredentialAndPreservesOtherSessions(t *testing.T) {
 	}
 }
 
+func TestXCodeRevokeOperationRetryAndCredentialBinding(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	rotated, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{
+		SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop",
+	}, "", "")
+	require.NoError(t, err)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: rotated.RefreshToken,
+		ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	result, err := service.SubmitXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	storedTarget, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, storedTarget.Status)
+	targetKey, err := model.GetTokenById(bundle.Token.Id)
+	require.NoError(t, err)
+	assert.Equal(t, common.TokenStatusDisabled, targetKey.Status)
+	// 响应丢失后过了刷新宽限期，仍只能凭原操作凭据读取已提交结果。
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", 1).Error)
+	result, err = service.SubmitXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	result, err = service.QueryXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	wrong := input
+	wrong.RefreshToken = other.RefreshToken
+	_, err = service.QueryXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	wrong = input
+	wrong.OperationID = "fedcba9876543210fedcba9876543210"
+	_, err = service.QueryXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	stored, err := model.GetUserSessionBySID(other.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+	// 会话可早于操作记录清理，已提交结果仍须能用原凭据查询。
+	require.NoError(t, model.DB.Where("sid = ?", input.SessionID).Delete(&model.UserSession{}).Error)
+	result, err = service.QueryXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	require.NoError(t, model.DeleteExpiredXCodeRevokeOperations(time.Now().Add(8*24*time.Hour).Unix()))
+	_, err = service.QueryXCodeRevokeOperation(input)
+	require.Error(t, err)
+}
+
+func TestXCodeRevokeOperationSecurityBoundaries(t *testing.T) {
+	user, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	otherUser := &model.User{Username: "other-revoke-user", Password: user.Password, AffCode: "other-revoke-aff", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	require.NoError(t, model.DB.Create(otherUser).Error)
+	require.NoError(t, model.PublishUserAuthCache(otherUser.Id))
+	otherDashboard, err := service.CreateLoginSession(otherUser.Id, "password", "", "")
+	require.NoError(t, err)
+	otherIdentity, err := service.ParseAccessToken(otherDashboard.AccessToken)
+	require.NoError(t, err)
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, otherIdentity), "", "")
+	require.NoError(t, err)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	wrong := input
+	wrong.RefreshToken = other.RefreshToken
+	_, err = service.SubmitXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	wrong = input
+	wrong.ClientID = "xwork-cli"
+	_, err = service.SubmitXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	_, err = service.QueryXCodeRevokeOperation(input)
+	require.Error(t, err)
+	rotated, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{SessionID: input.SessionID, RefreshToken: input.RefreshToken, ClientID: input.ClientID}, "", "")
+	require.NoError(t, err)
+	// 前代凭据在并发宽限内可撤销；操作证明在宽限结束后仍可查询。
+	result, err := service.SubmitXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", input.SessionID).Update("previous_valid_until", 1).Error)
+	result, err = service.QueryXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	wrong = input
+	wrong.RefreshToken = rotated.RefreshToken
+	_, err = service.QueryXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	// 键按 SID 隔离：另一用户的会话以自己的有效凭据使用同一 operation_id 独立成功，
+	// 不受第一个会话的记录影响。
+	wrong = service.XCodeRevokeOperationRequest{SessionID: other.Session.SID, RefreshToken: other.RefreshToken, ClientID: "xcode-desktop", OperationID: input.OperationID}
+	result, err = service.SubmitXCodeRevokeOperation(wrong)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+	otherStored, err := model.GetUserSessionBySID(other.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, otherStored.Status)
+	key, err := model.GetTokenById(other.Token.Id)
+	require.NoError(t, err)
+	assert.Equal(t, common.TokenStatusDisabled, key.Status)
+}
+
+func TestXCodeRevokeOperationConcurrentAndOtherRevocation(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	results := make(chan string, 2)
+	errors := make(chan error, 2)
+	for range 2 {
+		workers.Go(func() {
+			<-start
+			result, err := service.SubmitXCodeRevokeOperation(input)
+			results <- result
+			errors <- err
+		})
+	}
+	close(start)
+	workers.Wait()
+	for range 2 {
+		require.NoError(t, <-errors)
+		assert.Equal(t, "committed", <-results)
+	}
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	revoked, err := model.RevokeUserSession(dashboard.UserID, other.Session.SID, "user_revoked")
+	require.NoError(t, err)
+	require.True(t, revoked)
+	otherInput := service.XCodeRevokeOperationRequest{SessionID: other.Session.SID, RefreshToken: other.RefreshToken, ClientID: "xcode-desktop", OperationID: "fedcba9876543210fedcba9876543210"}
+	_, err = service.SubmitXCodeRevokeOperation(otherInput)
+	require.ErrorIs(t, err, service.ErrRefreshTokenInvalid)
+	_, err = service.QueryXCodeRevokeOperation(otherInput)
+	require.ErrorIs(t, err, service.ErrRefreshTokenInvalid)
+}
+
+func TestXCodeRevokeOperationSameIDAcrossSessionsIsIndependent(t *testing.T) {
+	user, dashboard := setupXCodeAuthTest(t)
+	first, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	otherUser := &model.User{Username: "concurrent-revoke-user", Password: user.Password, AffCode: "concurrent-revoke-aff", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+	require.NoError(t, model.DB.Create(otherUser).Error)
+	require.NoError(t, model.PublishUserAuthCache(otherUser.Id))
+	otherDashboard, err := service.CreateLoginSession(otherUser.Id, "password", "", "")
+	require.NoError(t, err)
+	identity, err := service.ParseAccessToken(otherDashboard.AccessToken)
+	require.NoError(t, err)
+	second, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, identity), "", "")
+	require.NoError(t, err)
+	// 键按 SID 隔离：两个不同用户的会话并发使用同一 operation_id 都必须各自成功。
+	const sharedID = "0123456789abcdef0123456789abcdef"
+	bundles := []*service.XCodeSessionBundle{first, second}
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	results := make([]string, len(bundles))
+	errs := make([]error, len(bundles))
+	for i := range bundles {
+		workers.Go(func() {
+			<-start
+			input := service.XCodeRevokeOperationRequest{SessionID: bundles[i].Session.SID, RefreshToken: bundles[i].RefreshToken, ClientID: "xcode-desktop", OperationID: sharedID}
+			results[i], errs[i] = service.SubmitXCodeRevokeOperation(input)
+		})
+	}
+	close(start)
+	workers.Wait()
+	for i := range bundles {
+		require.NoError(t, errs[i], "session %d must not collide with another session's operation_id", i)
+		assert.Equal(t, "committed", results[i])
+		stored, err := model.GetUserSessionBySID(bundles[i].Session.SID)
+		require.NoError(t, err)
+		assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+		key, err := model.GetTokenById(bundles[i].Token.Id)
+		require.NoError(t, err)
+		assert.Equal(t, common.TokenStatusDisabled, key.Status)
+	}
+	var operations []model.XCodeRevokeOperation
+	require.NoError(t, model.DB.Order("session_id").Find(&operations).Error)
+	require.Len(t, operations, 2)
+	assert.NotEqual(t, operations[0].OperationHash, operations[1].OperationHash, "the same operation_id maps to disjoint per-session keys")
+	assert.NotEqual(t, operations[0].SessionID, operations[1].SessionID)
+
+	// 每个会话只能用自己的凭据读取自己的结果；另一会话的凭据查询同一 ID 得到统一失败。
+	for i := range bundles {
+		own := service.XCodeRevokeOperationRequest{SessionID: bundles[i].Session.SID, RefreshToken: bundles[i].RefreshToken, ClientID: "xcode-desktop", OperationID: sharedID}
+		result, err := service.QueryXCodeRevokeOperation(own)
+		require.NoError(t, err)
+		assert.Equal(t, "committed", result)
+		cross := own
+		cross.SessionID, cross.RefreshToken = bundles[1-i].Session.SID, bundles[1-i].RefreshToken
+		cross.OperationID = "ffffffffffffffffffffffffffffffff"
+		_, err = service.QueryXCodeRevokeOperation(cross)
+		assert.ErrorIs(t, err, service.ErrRefreshTokenInvalid, "another session's query must not observe this session's result")
+	}
+}
+
+func TestXCodeRevokeOperationSerializesRefreshBeforeFence(t *testing.T) {
+	user, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	enableXCodeAuthTestRedis(t, user.Id)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	model.DB = model.DB.WithContext(ctx)
+	updated, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	require.NoError(t, model.DB.Callback().Update().After("gorm:update").Register("revoke_refresh_barrier", func(tx *gorm.DB) {
+		if tx.Statement.Table != "user_sessions" || tx.Error != nil {
+			return
+		}
+		if _, inTransaction := tx.Statement.ConnPool.(gorm.TxCommitter); !inTransaction {
+			return
+		}
+		once.Do(func() {
+			close(updated)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				tx.AddError(ctx.Err())
+			}
+		})
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove("revoke_refresh_barrier") })
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	revoked := make(chan error, 1)
+	go func() { _, err := service.SubmitXCodeRevokeOperation(input); revoked <- err }()
+	select {
+	case <-updated:
+	case <-ctx.Done():
+		t.Fatal("revoke did not reach database update")
+	}
+	refreshed := make(chan error, 1)
+	go func() {
+		_, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{SessionID: input.SessionID, RefreshToken: input.RefreshToken, ClientID: input.ClientID}, "", "")
+		refreshed <- err
+	}()
+	close(release)
+	require.NoError(t, <-revoked)
+	require.Error(t, <-refreshed)
+	result, err := service.QueryXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+}
+
+func TestXCodeRevokeOperationFenceExpiresBeforeCommit(t *testing.T) {
+	if os.Getenv("TEST_SECURITY_DIALECT") == "sqlite" {
+		t.Skip("SQLite readers block on fixture transaction mode")
+	}
+	user, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	server := miniredis.RunT(t)
+	previous := common.RDB
+	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
+	common.RedisEnabled, common.RDB = true, client
+	t.Cleanup(func() { common.RedisEnabled, common.RDB = false, previous; _ = client.Close() })
+	require.NoError(t, model.PublishUserAuthCache(user.Id))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	model.DB = model.DB.WithContext(ctx)
+	atCommit, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	require.NoError(t, model.DB.Callback().Update().After("gorm:update").Register("revoke_commit_barrier", func(tx *gorm.DB) {
+		if tx.Statement.Table != "tokens" || tx.Error != nil {
+			return
+		}
+		once.Do(func() {
+			close(atCommit)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				tx.AddError(ctx.Err())
+			}
+		})
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove("revoke_commit_barrier") })
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	outcome := make(chan error, 1)
+	go func() { _, err := service.SubmitXCodeRevokeOperation(input); outcome <- err }()
+	select {
+	case <-atCommit:
+	case <-ctx.Done():
+		t.Fatal("revoke did not reach barrier")
+	}
+	server.FastForward(2 * time.Hour)
+	stale, err := model.GetUserSessionCached(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stale.Status)
+	// 模拟另一进程在旧快照上填充缓存，随后提交后的 tombstone 写入失败。
+	key := "auth:session:" + common.GenerateHMACWithKey([]byte("user-session-cache-v1:"+common.SessionSecret), bundle.Session.SID)
+	require.NoError(t, client.HSet(ctx, key, map[string]any{
+		"SID": bundle.Session.SID, "UserID": user.Id, "Version": bundle.Session.Version,
+		"UserAuthVersion": bundle.Session.UserAuthVersion, "Status": model.UserSessionStatusActive,
+		"ExpiresAt": bundle.Session.ExpiresAt, "CacheSchema": 3, "ClientPurpose": model.ClientPurposeXCode,
+	}).Err())
+	server.SetError("ERR injected tombstone failure")
+	close(release)
+	require.NoError(t, <-outcome)
+	server.SetError("")
+	_, err = model.GetUserSessionCached(bundle.Session.SID)
+	assert.ErrorIs(t, err, model.ErrUserSessionInactive, "stale active cache must not authorize after commit")
+	control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+	require.NoError(t, err)
+	_, _, err = service.ValidateXCodeLoginSession(control)
+	assert.Error(t, err, "old control token must not authorize after commit")
+}
+
+func TestXCodeRevokeOperationAlreadyRevokedBindsIDAndCanonicalProof(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	revoked, err := model.RevokeUserSession(dashboard.UserID, bundle.Session.SID, "user_revoked")
+	require.NoError(t, err)
+	require.True(t, revoked)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	for _, id := range []string{input.OperationID, "11111111111111111111111111111111", "22222222222222222222222222222222"} {
+		input.OperationID = id
+		_, err := service.SubmitXCodeRevokeOperation(input)
+		require.ErrorIs(t, err, service.ErrRefreshTokenInvalid)
+		_, err = service.QueryXCodeRevokeOperation(input)
+		require.ErrorIs(t, err, service.ErrRefreshTokenInvalid)
+	}
+	var count int64
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&count).Error)
+	assert.Zero(t, count)
+	wrong := input
+	wrong.SessionID = other.Session.SID
+	_, err = service.SubmitXCodeRevokeOperation(wrong)
+	require.Error(t, err)
+	stored, err := model.GetUserSessionBySID(other.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+	input.RefreshToken = " " + input.RefreshToken + " "
+	_, err = service.QueryXCodeRevokeOperation(input)
+	require.Error(t, err, "noncanonical refresh must be rejected consistently")
+}
+
+func TestXCodeRevokeOperationRejectsExpiredPreviousRefresh(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	_, err = service.RefreshXCodeSession(service.XCodeRefreshRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop"}, "", "")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", 1).Error)
+	_, err = service.SubmitXCodeRevokeOperation(service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"})
+	require.Error(t, err)
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+}
+
+func TestXCodeRevokeOperationDatabaseFailureRollsBack(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	enableXCodeAuthTestRedis(t, dashboard.UserID)
+	injected := errors.New("injected transaction failure")
+	require.NoError(t, model.DB.Callback().Update().After("gorm:update").Register("revoke_injected_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "tokens" {
+			tx.AddError(injected)
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove("revoke_injected_failure") })
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	_, err = service.SubmitXCodeRevokeOperation(input)
+	require.ErrorIs(t, err, injected)
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&count).Error)
+	assert.Zero(t, count)
+	_, err = service.QueryXCodeRevokeOperation(input)
+	assert.Error(t, err)
+}
+
+var (
+	errInjectedCommit       = errors.New("injected commit failure")
+	errInjectedDatabaseDown = errors.New("injected database outage")
+)
+
+// commitFaultPool 包装 *sql.DB，使显式事务的 COMMIT 阶段可注入故障。GORM 的 callback
+// 只覆盖单条语句的隐式事务，无法影响 DB.Transaction 的提交，所以在连接池层包装 BeginTx。
+// applied 为 true 时先真实提交再报错（数据库已生效但确认丢失）；为 false 时回滚后报错
+// （提交未生效）。两种都对调用方表现为“提交结果不明”。unavailable 为 true 时所有访问
+// 立即失败，模拟主库整体不可用。
+type commitFaultPool struct {
+	*sql.DB
+	applied     bool
+	failing     atomic.Bool
+	unavailable atomic.Bool
+	// transactionsDown 只让事务无法开始，读取仍然可用：数据库可读但撤销事务无法持久化。
+	transactionsDown atomic.Bool
+	// commitAttempts 统计被故障注入拦截的 COMMIT 次数，证明失败确实发生在提交阶段。
+	commitAttempts atomic.Int32
+	// beginAttempts 统计开启事务的次数：任何行锁都以事务为前提，因此“没有开启事务”
+	// 在 SQLite（不支持 FOR UPDATE）上同样证明没有取得行锁。
+	beginAttempts atomic.Int32
+}
+
+func (pool *commitFaultPool) GetDBConn() (*sql.DB, error) { return pool.DB, nil }
+
+func (pool *commitFaultPool) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	if pool.unavailable.Load() {
+		return nil, errInjectedDatabaseDown
+	}
+	return pool.DB.PrepareContext(ctx, query)
+}
+
+func (pool *commitFaultPool) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if pool.unavailable.Load() {
+		return nil, errInjectedDatabaseDown
+	}
+	return pool.DB.ExecContext(ctx, query, args...)
+}
+
+func (pool *commitFaultPool) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if pool.unavailable.Load() {
+		return nil, errInjectedDatabaseDown
+	}
+	return pool.DB.QueryContext(ctx, query, args...)
+}
+
+func (pool *commitFaultPool) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if pool.unavailable.Load() {
+		// 已取消的 context 使 *sql.Row 携带错误，Scan 时返回，等价于连接失败。
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		return pool.DB.QueryRowContext(canceled, query, args...)
+	}
+	return pool.DB.QueryRowContext(ctx, query, args...)
+}
+
+func (pool *commitFaultPool) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
+	pool.beginAttempts.Add(1)
+	if pool.unavailable.Load() || pool.transactionsDown.Load() {
+		return nil, errInjectedDatabaseDown
+	}
+	tx, err := pool.DB.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if !pool.failing.Load() {
+		return tx, nil
+	}
+	return &commitFaultTx{Tx: tx, applied: pool.applied, attempts: &pool.commitAttempts}, nil
+}
+
+type commitFaultTx struct {
+	*sql.Tx
+	applied  bool
+	attempts *atomic.Int32
+}
+
+func (tx *commitFaultTx) Commit() error {
+	tx.attempts.Add(1)
+	if !tx.applied {
+		_ = tx.Tx.Rollback()
+		return errInjectedCommit
+	}
+	if err := tx.Tx.Commit(); err != nil {
+		return err
+	}
+	return errInjectedCommit
+}
+
+// 凭据不匹配的首次提交必须在开启事务、获取任何行锁之前被拒绝：否则无效凭据也能在
+// 用户行锁和会话行锁上排队，放大拒绝服务面。
+func TestXCodeRevokeOperationRejectsBadCredentialBeforeAnyLock(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+
+	base := model.DB
+	sqlDB, err := base.DB()
+	require.NoError(t, err)
+	pool := &commitFaultPool{DB: sqlDB}
+	counted := base.WithContext(context.Background())
+	counted.Statement.ConnPool, counted.Config.ConnPool = pool, pool
+	model.DB = counted
+	t.Cleanup(func() { model.DB = base })
+	// 同时观察 SELECT ... FOR UPDATE（MySQL/PostgreSQL 发出；SQLite 不支持该子句，由事务计数兜底）。
+	var lockingReads atomic.Int32
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register("bad_credential_lock_observer", func(tx *gorm.DB) {
+		if _, locking := tx.Statement.Clauses["FOR"]; locking {
+			lockingReads.Add(1)
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Query().Remove("bad_credential_lock_observer") })
+
+	valid := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	wrongSecret := valid
+	wrongSecret.RefreshToken = bundle.Session.SID + ".not-the-issued-secret"
+	// 他人的合法 refresh 也不能用于本会话：SID 与 secret 必须同属一个会话。
+	foreignSecret := valid
+	foreignSecret.RefreshToken = bundle.Session.SID + "." + strings.TrimPrefix(other.RefreshToken, other.Session.SID+".")
+	// 前代凭据超出并发宽限期后不再有效（旧代 refresh 的重放由 refresh 流程处理，这里只验证不抢锁）。
+	rotated, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop"}, "", "")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", 1).Error)
+	expiredPrevious := valid
+
+	response := func(input service.XCodeRevokeOperationRequest) (int, string) {
+		body, err := common.Marshal(input)
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/xcode/v1/auth/revoke-operations", bytes.NewReader(body))
+		SubmitXCodeRevokeOperation(c)
+		return recorder.Code, strings.ReplaceAll(recorder.Body.String(), c.GetString(common.RequestIdKey), "")
+	}
+	// 基线：凭据错误本来的响应（既不依赖本次预检，也不依赖是否取得锁）。
+	baselineStatus, baselineBody := response(service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: "not-a-token", ClientID: "xcode-desktop", OperationID: valid.OperationID})
+	require.Equal(t, http.StatusUnauthorized, baselineStatus)
+
+	for name, input := range map[string]service.XCodeRevokeOperationRequest{
+		"wrong secret":                      wrongSecret,
+		"another session's secret":          foreignSecret,
+		"previous refresh beyond the grace": expiredPrevious,
+	} {
+		pool.beginAttempts.Store(0)
+		lockingReads.Store(0)
+		status, body := response(input)
+		assert.Equal(t, baselineStatus, status, name)
+		assert.Equal(t, baselineBody, body, "%s must be indistinguishable from any other bad credential", name)
+		assert.Zero(t, pool.beginAttempts.Load(), "%s must not open a transaction", name)
+		assert.Zero(t, lockingReads.Load(), "%s must not issue SELECT ... FOR UPDATE", name)
+	}
+
+	// 有效凭据仍然正常撤销，说明上面的“零事务”不是因为整条路径不可用。
+	valid.RefreshToken = rotated.RefreshToken
+	pool.beginAttempts.Store(0)
+	status, body := response(valid)
+	assert.Equal(t, http.StatusOK, status, body)
+	assert.Contains(t, body, "committed")
+	assert.EqualValues(t, 1, pool.beginAttempts.Load(), "a valid first submit opens exactly one transaction")
+}
+
+// 预检基于事务外的快照，只能提前拒绝、不能授权。凭据在预检通过之后、行锁取得之前失效
+// （refresh 轮换并且宽限期已过）时，事务内的锁下复核必须仍然拒绝：不撤销会话、不写记录、
+// 不停用托管 key。这是预检不可替代锁内复核（TOCTOU）的回归。
+func TestXCodeRevokeOperationRecheckUnderLockAfterPrecheck(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+
+	base := model.DB
+	sqlDB, err := base.DB()
+	require.NoError(t, err)
+	pool := &commitFaultPool{DB: sqlDB}
+	counted := base.WithContext(context.Background())
+	counted.Statement.ConnPool, counted.Config.ConnPool = pool, pool
+	model.DB = counted
+	t.Cleanup(func() { model.DB = base })
+
+	// 注入点：事务外读取会话快照（预检的输入）刚返回之后、事务开始之前。此刻没有任何事务和
+	// 行锁，所以在 SQLite 的 immediate 事务模式下用独立连接写入也不会阻塞。写入等价于另一
+	// 节点上已提交的刷新：本次所用凭据变成前代，并且已超出并发宽限期。
+	var raced atomic.Int32
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register("precheck_toctou_rotate", func(tx *gorm.DB) {
+		if _, inTransaction := tx.Statement.ConnPool.(gorm.TxCommitter); inTransaction || tx.Statement.Table != "user_sessions" || tx.Error != nil {
+			return
+		}
+		if !raced.CompareAndSwap(0, 1) {
+			return
+		}
+		require.NoError(t, base.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Updates(map[string]any{
+			"previous_refresh_hash": bundle.Session.RefreshHash, "previous_valid_until": 1,
+			"refresh_hash": strings.Repeat("f", 64),
+		}).Error)
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Query().Remove("precheck_toctou_rotate") })
+
+	result, err := service.SubmitXCodeRevokeOperation(input)
+	require.EqualValues(t, 1, raced.Load(), "the race must have been injected between the snapshot read and the transaction")
+	require.ErrorIs(t, err, service.ErrRefreshTokenInvalid)
+	assert.Empty(t, result)
+	// 事务确实被打开过，说明预检（旧快照）放行了，拒绝来自事务内的锁下复核。
+	assert.EqualValues(t, 1, pool.beginAttempts.Load(), "the stale snapshot must pass the pre-check so that the in-lock re-check is what rejects")
+
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status, "a credential that went stale after the pre-check must not revoke the session")
+	key, err := model.GetTokenById(bundle.Token.Id)
+	require.NoError(t, err)
+	assert.Equal(t, common.TokenStatusEnabled, key.Status)
+	var records int64
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&records).Error)
+	assert.Zero(t, records)
+}
+
+func TestXCodeRevokeOperationCommitOutcomeUnknown(t *testing.T) {
+	for _, applied := range []bool{true, false} {
+		name := "commit not applied"
+		if applied {
+			name = "commit applied but acknowledgement lost"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, dashboard := setupXCodeAuthTest(t)
+			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+			require.NoError(t, err)
+			control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+			require.NoError(t, err)
+			server := enableXCodeAuthTestRedis(t, dashboard.UserID)
+
+			base := model.DB
+			sqlDB, err := base.DB()
+			require.NoError(t, err)
+			pool := &commitFaultPool{DB: sqlDB, applied: applied}
+			faulty := base.WithContext(context.Background())
+			faulty.Statement.ConnPool, faulty.Config.ConnPool = pool, pool
+			model.DB = faulty
+			t.Cleanup(func() { model.DB = base })
+
+			input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+			// 经真实 HTTP 处理器提交：无论提交是否真正生效，本次 submit 都只能返回
+			// 503 XCODE_BACKEND_UNAVAILABLE，绝不返回 committed。
+			body, err := common.Marshal(input)
+			require.NoError(t, err)
+			response := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(response)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/xcode/v1/auth/revoke-operations", bytes.NewReader(body))
+			pool.failing.Store(true)
+			SubmitXCodeRevokeOperation(c)
+			pool.failing.Store(false)
+			assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+			assert.Contains(t, response.Body.String(), "XCODE_BACKEND_UNAVAILABLE")
+			assert.NotContains(t, response.Body.String(), "committed")
+			assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+			assert.EqualValues(t, 1, pool.commitAttempts.Load(), "the failure must come from the COMMIT stage, not an earlier step")
+
+			stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+			require.NoError(t, err)
+			key, err := model.GetTokenById(bundle.Token.Id)
+			require.NoError(t, err)
+			var records int64
+			require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&records).Error)
+			queried, queryErr := service.QueryXCodeRevokeOperation(input)
+			_, cachedErr := model.GetUserSessionCached(bundle.Session.SID)
+			assert.ErrorIs(t, cachedErr, model.ErrUserSessionInactive, "the pre-commit fence still fails closed")
+
+			if applied {
+				assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+				assert.Equal(t, common.TokenStatusDisabled, key.Status)
+				assert.EqualValues(t, 1, records)
+				require.NoError(t, queryErr, "the client confirms the outcome with query")
+				assert.Equal(t, "committed", queried)
+				// 即使 Redis 栅栏过期，主库已提交的撤销仍使旧凭据失效。
+				server.FastForward(2 * time.Hour)
+				_, cachedErr = model.GetUserSessionCached(bundle.Session.SID)
+				assert.ErrorIs(t, cachedErr, model.ErrUserSessionInactive)
+				_, _, validateErr := service.ValidateXCodeLoginSession(control)
+				assert.ErrorIs(t, validateErr, service.ErrLoginSessionRevoked)
+			} else {
+				assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+				assert.Equal(t, common.TokenStatusEnabled, key.Status)
+				assert.Zero(t, records)
+				assert.ErrorIs(t, queryErr, service.ErrRefreshTokenInvalid, "no record means the outcome cannot be inferred as success")
+				// 栅栏只是保守拒绝：过期后未提交的会话恢复有效，没有任何权威状态被破坏。
+				server.FastForward(2 * time.Hour)
+				_, cachedErr = model.GetUserSessionCached(bundle.Session.SID)
+				assert.NoError(t, cachedErr)
+			}
+
+			// 故障排除后用同一 operation_id 重试：幂等地得到 committed，且只有一条记录。
+			result, err := service.SubmitXCodeRevokeOperation(input)
+			require.NoError(t, err)
+			assert.Equal(t, "committed", result)
+			require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&records).Error)
+			assert.EqualValues(t, 1, records)
+			stored, err = model.GetUserSessionBySID(bundle.Session.SID)
+			require.NoError(t, err)
+			assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+			key, err = model.GetTokenById(bundle.Token.Id)
+			require.NoError(t, err)
+			assert.Equal(t, common.TokenStatusDisabled, key.Status)
+		})
+	}
+}
+
+func TestXCodeRevokeOperationRedisFailureRollsBack(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	server := miniredis.RunT(t)
+	previousClient := common.RDB
+	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
+	common.RedisEnabled, common.RDB = true, client
+	t.Cleanup(func() { common.RedisEnabled = false; common.RDB = previousClient; _ = client.Close() })
+	server.Close()
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	_, err = service.SubmitXCodeRevokeOperation(input)
+	require.Error(t, err)
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestXCodeRevokeOperationHTTPAndSecretProtection(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	input := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	body, err := common.Marshal(input)
+	require.NoError(t, err)
+	for _, handler := range []gin.HandlerFunc{SubmitXCodeRevokeOperation, QueryXCodeRevokeOperation} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/xcode/v1/auth/revoke-operations", bytes.NewReader(body))
+		handler(c)
+		assert.Equal(t, http.StatusOK, response.Code)
+		assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
+		assert.NotContains(t, response.Body.String(), bundle.RefreshToken)
+		assert.Contains(t, response.Body.String(), `"committed"`)
+	}
+	var operations []model.XCodeRevokeOperation
+	require.NoError(t, model.DB.Find(&operations).Error)
+	require.Len(t, operations, 1)
+	assert.NotContains(t, operations[0].CredentialHash, bundle.RefreshToken)
+	assert.NotEqual(t, input.OperationID, operations[0].OperationHash)
+	assert.NotEqual(t, bundle.Session.RefreshHash, operations[0].CredentialHash)
+	previousSecret := common.SessionSecret
+	common.SessionSecret = "different-test-secret"
+	_, err = service.QueryXCodeRevokeOperation(input)
+	common.SessionSecret = previousSecret
+	require.Error(t, err)
+	result, err := service.QueryXCodeRevokeOperation(input)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+}
+
+// recordQueriedTables 记录回调期间 GORM 查询的表名序列，用于证明不同失败原因
+// 经过完全相同的数据库访问路径。
+func recordQueriedTables(t *testing.T, name string) func() []string {
+	t.Helper()
+	var mu sync.Mutex
+	var tables []string
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+		mu.Lock()
+		defer mu.Unlock()
+		tables = append(tables, tx.Statement.Table)
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Query().Remove(name) })
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		observed := append([]string(nil), tables...)
+		tables = tables[:0]
+		return observed
+	}
+}
+
+func TestXCodeRevokeOperationQueryFailuresAreUniform(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	other, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	committed := service.XCodeRevokeOperationRequest{SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+	_, err = service.SubmitXCodeRevokeOperation(committed)
+	require.NoError(t, err)
+
+	// 另一个会话提交后让记录过期：凭据正确但结果保留期已过。
+	expiredBundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	expired := service.XCodeRevokeOperationRequest{SessionID: expiredBundle.Session.SID, RefreshToken: expiredBundle.RefreshToken, ClientID: "xcode-desktop", OperationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	_, err = service.SubmitXCodeRevokeOperation(expired)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Where("session_id = ?", expiredBundle.Session.SID).Update("expires_at", 1).Error)
+
+	wrongCredential := committed
+	wrongCredential.RefreshToken = bundle.Session.SID + ".not-the-issued-secret"
+	wrongClient := committed
+	wrongClient.ClientID = "xwork-cli"
+	unknownID := committed
+	unknownID.OperationID = "fedcba9876543210fedcba9876543210"
+	otherSessionSameID := service.XCodeRevokeOperationRequest{SessionID: other.Session.SID, RefreshToken: other.RefreshToken, ClientID: "xcode-desktop", OperationID: committed.OperationID}
+	cases := map[string]service.XCodeRevokeOperationRequest{
+		"wrong credential for an existing operation":         wrongCredential,
+		"wrong client for an existing operation":             wrongClient,
+		"operation id that was never submitted":              unknownID,
+		"same id used by another session that never ran it":  otherSessionSameID,
+		"correct credential but the retained record expired": expired,
+	}
+
+	// 三种失败必须给出完全相同的 HTTP 状态、响应体（除 request_id）和数据库访问序列。
+	type observation struct {
+		status int
+		body   string
+		tables []string
+	}
+	drain := recordQueriedTables(t, "query_uniformity_recorder")
+	observe := func(input service.XCodeRevokeOperationRequest) observation {
+		body, err := common.Marshal(input)
+		require.NoError(t, err)
+		drain()
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/xcode/v1/auth/revoke-operations/query", bytes.NewReader(body))
+		QueryXCodeRevokeOperation(c)
+		return observation{status: response.Code, body: response.Body.String(), tables: drain()}
+	}
+	var baseline *observation
+	for name, input := range cases {
+		got := observe(input)
+		assert.NotEqual(t, http.StatusOK, got.status, name)
+		assert.NotContains(t, got.body, "committed", name)
+		assert.NotContains(t, got.body, bundle.RefreshToken, name)
+		// 固定期望序列，防止记录器失效时两个空序列“相等”造成空洞通过。
+		assert.Equal(t, []string{"x_code_revoke_operations"}, got.tables, "%s must issue exactly one keyed read", name)
+		if baseline == nil {
+			baseline = &got
+			continue
+		}
+		assert.Equal(t, baseline.status, got.status, name)
+		assert.Equal(t, baseline.body, got.body, name)
+		assert.Equal(t, baseline.tables, got.tables, "%s must follow the same database access path", name)
+	}
+	require.NotNil(t, baseline)
+	// 已提交的合法查询仍可读到结果，说明上面的失败不是因为路径整体不可用。
+	result, err := service.QueryXCodeRevokeOperation(committed)
+	require.NoError(t, err)
+	assert.Equal(t, "committed", result)
+}
+
+func TestXCodeRevokeOperationRejectsNonCanonicalSessionID(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	upper := strings.ToUpper(bundle.Session.SID)
+	secret := strings.TrimPrefix(bundle.RefreshToken, bundle.Session.SID+".")
+	for name, sid := range map[string]string{"upper case": upper, "braced": "{" + bundle.Session.SID + "}", "urn": "urn:uuid:" + bundle.Session.SID} {
+		input := service.XCodeRevokeOperationRequest{SessionID: sid, RefreshToken: sid + "." + secret, ClientID: "xcode-desktop", OperationID: "0123456789abcdef0123456789abcdef"}
+		_, err := service.SubmitXCodeRevokeOperation(input)
+		assert.ErrorIs(t, err, service.ErrRefreshTokenInvalid, name)
+		_, err = service.QueryXCodeRevokeOperation(input)
+		assert.ErrorIs(t, err, service.ErrRefreshTokenInvalid, name)
+	}
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusActive, stored.Status, "a non-canonical spelling must not revoke or create a second key space")
+	var count int64
+	require.NoError(t, model.DB.Model(&model.XCodeRevokeOperation{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func TestXCodeEntryConfigurationRejectsUntrustedOrigins(t *testing.T) {
 	t.Setenv("XCODE_INTEGRATION_ENABLED", "")
 	assert.False(t, common.XCodeIntegrationEnabled())
@@ -2060,8 +2918,9 @@ func TestXCodeCodeHonorsPrecommitAuthorityFences(t *testing.T) {
 			if fence == "user auth floor" {
 				require.NoError(t, model.SetUserAuthVersionFence(user.Id, user.AuthVersion+1))
 			} else {
-				_, err := model.GetUserSessionCached(identity.SessionID)
+				snapshot, err := model.GetUserSessionBySID(identity.SessionID)
 				require.NoError(t, err)
+				require.NoError(t, model.PublishCreatedUserSession(snapshot, model.UserSessionCacheDeadline()))
 				keys := server.Keys()
 				var cacheKey string
 				for _, key := range keys {
@@ -2077,6 +2936,129 @@ func TestXCodeCodeHonorsPrecommitAuthorityFences(t *testing.T) {
 			var count int64
 			require.NoError(t, model.DB.Model(&model.Token{}).Count(&count).Error)
 			assert.Zero(t, count)
+		})
+	}
+}
+
+func TestXCodeSessionAuthorityAcrossDatabaseDialects(t *testing.T) {
+	for _, field := range []string{"auth_version", "status"} {
+		t.Run(field, func(t *testing.T) {
+			user, dashboard := setupXCodeAuthTest(t)
+			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+			require.NoError(t, err)
+			enableXCodeAuthTestRedis(t, user.Id)
+			identity, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+			require.NoError(t, err)
+			value := any(user.AuthVersion + 1)
+			if field == "status" {
+				value = common.UserStatusDisabled
+			}
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update(field, value).Error)
+			_, _, err = service.ValidateXCodeLoginSession(identity)
+			assert.ErrorIs(t, err, service.ErrLoginSessionRevoked)
+		})
+	}
+}
+
+func TestXCodeRefreshReplayRedisOutageAcrossDatabaseDialects(t *testing.T) {
+	_, dashboard := setupXCodeAuthTest(t)
+	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+	require.NoError(t, err)
+	input := service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
+	_, err = service.RefreshXCodeSession(input, "", "")
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", 1).Error)
+	server := miniredis.RunT(t)
+	previousClient := common.RDB
+	client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
+	common.RedisEnabled, common.RDB = true, client
+	t.Cleanup(func() { common.RedisEnabled = false; common.RDB = previousClient; _ = client.Close() })
+	server.SetError("injected Redis outage")
+	_, err = service.RefreshXCodeSession(input, "", "")
+	require.ErrorIs(t, err, service.ErrLoginSessionRevoked)
+	server.SetError("")
+	stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+	key, err := model.GetTokenById(bundle.Token.Id)
+	require.NoError(t, err)
+	assert.Equal(t, common.TokenStatusDisabled, key.Status)
+}
+
+// 数据库与 Redis 同时故障是无法持久化的物理边界：本测试固定的是失败关闭行为，
+// 而不是“恢复后自动补做撤销”。
+func TestXCodeRefreshReplayDuringOutageFailsClosed(t *testing.T) {
+	type outage struct {
+		name string
+		// apply 返回恢复函数。
+		apply func(pool *commitFaultPool) (restore func())
+	}
+	for _, scenario := range []outage{
+		{"database unreachable", func(pool *commitFaultPool) func() {
+			pool.unavailable.Store(true)
+			return func() { pool.unavailable.Store(false) }
+		}},
+		{"database readable but revocation transaction cannot be persisted", func(pool *commitFaultPool) func() {
+			pool.transactionsDown.Store(true)
+			return func() { pool.transactionsDown.Store(false) }
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			_, dashboard := setupXCodeAuthTest(t)
+			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+			require.NoError(t, err)
+			oldInput := service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
+			rotated, err := service.RefreshXCodeSession(oldInput, "", "")
+			require.NoError(t, err)
+			control, err := service.ParseXCodeAccessToken(rotated.AccessToken)
+			require.NoError(t, err)
+			// 旧代凭据已超出并发宽限期：再次出现即属于已识别的重放。
+			require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", 1).Error)
+			server := enableXCodeAuthTestRedis(t, dashboard.UserID)
+
+			base := model.DB
+			sqlDB, err := base.DB()
+			require.NoError(t, err)
+			pool := &commitFaultPool{DB: sqlDB}
+			faulty := base.WithContext(context.Background())
+			faulty.Statement.ConnPool, faulty.Config.ConnPool = pool, pool
+			model.DB = faulty
+			t.Cleanup(func() { model.DB = base })
+
+			server.SetError("injected Redis outage")
+			restore := scenario.apply(pool)
+			replay, err := service.RefreshXCodeSession(oldInput, "", "")
+			// 重放请求本身返回故障错误，不签发任何凭据；也不得宣称会话已撤销。
+			require.ErrorIs(t, err, errInjectedDatabaseDown)
+			assert.NotErrorIs(t, err, service.ErrLoginSessionRevoked)
+			assert.Nil(t, replay)
+			if scenario.name == "database unreachable" {
+				// 数据库不可达时所有授权同样失败关闭，包括仍在有效期内的当前凭据。
+				_, _, err = service.ValidateXCodeLoginSession(control)
+				require.Error(t, err)
+				_, err = model.GetUserSessionCached(bundle.Session.SID)
+				require.Error(t, err)
+			}
+
+			restore()
+			server.SetError("")
+			// 不承诺故障期间已持久记录泄漏：恢复后会话仍为 active，不会被自动补做撤销。
+			stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+			require.NoError(t, err)
+			assert.Equal(t, model.UserSessionStatusActive, stored.Status)
+			// 当前代凭据按原有规则继续可用。
+			_, _, err = service.ValidateXCodeLoginSession(control)
+			require.NoError(t, err)
+			// 故障恢复后，同一旧代凭据的新一次重放按既定规则撤销会话（这是新的请求，
+			// 不是对故障期间事件的补偿）。
+			_, err = service.RefreshXCodeSession(oldInput, "", "")
+			require.ErrorIs(t, err, service.ErrLoginSessionRevoked)
+			stored, err = model.GetUserSessionBySID(bundle.Session.SID)
+			require.NoError(t, err)
+			assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+			key, err := model.GetTokenById(bundle.Token.Id)
+			require.NoError(t, err)
+			assert.Equal(t, common.TokenStatusDisabled, key.Status)
 		})
 	}
 }

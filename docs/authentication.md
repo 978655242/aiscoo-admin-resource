@@ -7,9 +7,9 @@
 - Access Token 是有效期 15 分钟的 JWT，只保存在浏览器内存中，通过 `Authorization: Bearer <token>` 发送。
 - Refresh Token 是随机不透明值，有效期最长 30 天。浏览器只通过 `HttpOnly`、`SameSite=Strict` Cookie 持有它；服务端仅保存 HMAC 摘要，并在每次刷新时轮换。
 - `new_api_has_session` 是 Refresh Cookie 的会话提示，值恒为 `1`，`Path=/`、非 `HttpOnly`，与 Refresh Cookie 同时写入、同时清除、同一过期时间。它只声明"曾签发过 Refresh Cookie"，不含任何凭据，也不参与任何鉴权判定；伪造它唯一的效果是自费一次注定失败的 refresh。它存在的原因是 Refresh Cookie 被 `HttpOnly` 和 `Path=/api/user/auth` 双重限制，`/` 上的页面无法判断自己是否匿名，否则每次冷启动都要发一次注定 401 的 refresh，而该请求还会占用按 IP 计数的 `CriticalRateLimit` 配额。
-- `user_sessions` 是登录会话控制面，记录设备、IP、登录方式、最后活跃时间、到期时间和撤销状态。数据库中的 Session 状态是最终权威；撤销传播速度取决于下文所述的 Redis 拓扑。
-- 用户的密码、状态、角色或安全因子发生安全相关变化时，`auth_version` 会递增并使旧登录会话失效。订阅带来的分组升降级只刷新授权缓存，不会退出任何登录设备。
-- Redis 缓存保存用户鉴权快照和登录会话快照。版本栅栏和撤销 tombstone 防止旧缓存重新授权；Session 快照使用跟随 `SYNC_FREQUENCY` 的短 TTL，缓存未命中或未启用 Redis 时回退到数据库校验。
+- `user_sessions` 是登录会话控制面，记录设备、IP、登录方式、最后活跃时间、到期时间和撤销状态。鉴权必须读取主数据库的已提交 Session 状态，不以 Redis 的 active 快照授予权限。
+- 用户的密码、状态、角色或安全因子发生安全相关变化时，`auth_version` 会递增并使旧登录会话失效。本补丁只把面板登录会话（含 aiscoo 客户端控制令牌）和 XCode 托管 key 的准入改为读取主库用户状态及 `auth_version`。以下路径仍信任 Redis 用户快照中的 `Status`，用户被禁用后可能在缓存 TTL 内继续通过，不在本补丁范围：PAT 与旧版 access token（`middleware/auth.go` 的 `lookupAccessToken`，约 263、272 行）、通用（非 XCode）relay key（`TokenAuthReadOnly` 与 `TokenAuth`，约 522–541、644–663 行）、Playground（`controller/playground.go` 约 43 行）。订阅带来的分组升降级只刷新授权缓存，不会退出任何登录设备。
+- Redis 的 Session 拒绝状态可提前拒绝请求，但 active、缓存缺失、Redis 故障或恢复均不能替代权威数据库读取；数据库不可用时拒绝鉴权。撤销事务提交失败或结果不明时不报告成功，遗留拒绝状态可暂时拒绝有效会话。
 - Token/Session 缓存必须携带明确的 `ClientPurpose` 与缓存 schema；缺少字段或目的未知时回源数据库，不把缓存零值当作原生凭据。旧数据库行的空目的仍保持原生语义，缓存分别规范为 `general`（API key）和 `dashboard`（面板 Session）。托管 key 的 `ClientSessionSID` 也必须实际存在且与目的匹配；缓存修复不得丢失该绑定。Token 旧 hash 修复在同一次 Lua 操作中保留同一 token 已原子预扣、尚未批量落库的额度，不能从旧数据库余额重新发放额度。
 - 托管 `xcode` key 的用途由持久化字段决定，所有 key 分发入口共享精确 allowlist：只允许 `POST /v1/messages`、`POST /v1/chat/completions`、`POST /v1/responses`。models、readonly usage/log、旧 dashboard、compact、WebSocket GET、图片/视频/task/artifact 的 key 分支返回 `403 XCODE_RELAY_SCOPE_DENIED`；独立 route-bound artifact capability 保留原用途。
 - 托管推理必须绑定同用户的活跃 `xcode` SID，校验到期、撤销和当前 `auth_version`；普通 refresh 引起的 SessionVersion 轮换不会撤销同 SID key。服务器从指定授权关系读取实例 ID/revision，客户端 header、body、名称及原生 billing preference 不能指定资金；免费模型也先验证有效授权。
@@ -41,17 +41,15 @@
 
 ## 多节点 Redis 拓扑
 
-多节点部署必须共用同一主数据库。登录 Session、账户级活跃 Session 上限和签发窗口计数都以数据库为权威，因此这些限制在应用节点间全局生效。Redis 中的 Session Hash（包含 `revoking`/`revoked` tombstone）只是缓存，其 TTL 为 Session 剩余寿命与有效 `SYNC_FREQUENCY` 中的较小值；`SYNC_FREQUENCY` 默认及非法值回退均为 `60` 秒。读取缓存不会续期，过期后会按 SID 回源数据库。延迟完成的 active 缓存回写只能使用其数据库观察窗口尚未消耗的 TTL，不能在撤销 tombstone 到期后重新启动一个完整缓存周期。
+多节点部署必须共用同一具备已提交读一致性的主数据库；禁止将鉴权读取路由到可能滞后的副本。每次 Session 授权均执行新的主库读取，检查状态、期限、版本和归属。撤销事务成功提交后开始的读取不能凭旧 active 缓存授权；事务提交前已经读取的在途请求不保证被中断。普通退出、专用退出、refresh 重放、批量撤销和操作接口均采用同一规则。长事务、缓存并发填充、Redis 过期、重启或不可用不能改变该判定。数据库故障必须拒绝授权；事务失败或提交结果不明不能当作成功。撤销返回成功后的权威性以主库提交及随后新读取为边界，并不承诺撤回已经授权的工作。
 
-| Redis 部署方式 | Session 状态传播 | 限流语义 |
-| --- | --- | --- |
-| 所有节点共享 Redis | 正常撤销和版本发布通过同一缓存即时传播 | Redis 限流额度在所有节点间共享 |
-| 每个节点使用独立 Redis | 最迟在该节点 Session 缓存 TTL 到期后回源收敛，即不超过有效 `SYNC_FREQUENCY`；版本轮换期间，新 Token 在持有旧缓存的节点上可能短暂返回 401 | 每个节点独立计数，集群总额度最坏约为单节点阈值乘以节点数 |
-| 不使用 Redis | 每次 Session 校验直接读取数据库 | 使用各节点的内存限流器，额度同样按节点独立 |
+Redis Session hash 及短期拒绝栅栏仅用于保守拒绝和兼容旧调用，不是授权依据；其 TTL 和失败恢复不构成一致性证明。每次 Session 校验和托管 key 转发校验增加两次主库主键点查（Session 与用户）。此保证要求所有接受凭据的节点都运行此版本；滚动升级期间旧节点仍可能接受陈旧缓存，应先移除旧节点再依赖此保证。共享 Redis 限流额度全局共享；独立 Redis 或内存限流按节点独立。所有节点必须使用相同的 `SESSION_SECRET`，共享 Redis 的节点还须使用相同的 `CRYPTO_SECRET`。用户鉴权缓存和其他 Redis 缓存仍遵循各自的传播规则。
 
-`SYNC_FREQUENCY` 越大，独立 Redis 部署的陈旧窗口越长；值越小，每个活跃 SID 在每个节点上回源数据库的频率越高。默认配置下，持续活跃的 Session 每个节点最多约每 60 秒增加一次数据库主键点查。共享 Redis 时，撤销 tombstone 和版本发布仍保持即时传播。
+### 已知限制（撤销操作与会话校验）
 
-所有节点必须使用相同的 `SESSION_SECRET`。当多个节点连接同一个 Redis 时，还必须使用相同的 `CRYPTO_SECRET`，否则节点生成的缓存键摘要不一致，无法正确共享缓存。上述保证只覆盖登录 Session 鉴权的有界陈旧语义；限流额度及其他 Redis 缓存仍会受到 Redis 拓扑影响，不能据此认为整个控制面与拓扑无关。
+- 数据库迁移只在 master 节点执行（`IsMasterNode`）。滚动升级时如果新版非 master 节点先于 master 启动，`x_code_revoke_operations` 表尚不存在，新的撤销操作端点会因查询缺表返回 503（`XCODE_BACKEND_UNAVAILABLE`），属于失败关闭，不会误报成功；应先升级 master。
+- 撤销操作记录由 master 上的定时清理按 `expires_at` 删除；硬删除用户不会同步清理 `x_code_revoke_operations`，记录最长残留 7 天（不超过原会话到期时间）。残留记录含 `user_id`、SID、`client_id`、结果和按用途分离的 HMAC 摘要，不含明文凭据。
+- 撤销操作结果的 7 天保留期是代码常量，不可配置，也不跟随 `USER_SESSION_REVOKED_RETENTION_DAYS`。
 
 ## 浏览器接口
 
@@ -91,7 +89,9 @@
 
 客户端内存中已有会话时，应在 refresh/logout 请求中发送 `X-Auth-Session: <sid>`。Refresh Cookie 与该 SID 不一致时，两个端点都返回 `409 AUTH_SESSION_MISMATCH`，且不会轮换、撤销或清除任何会话；客户端先通过 refresh 清除本标签页的旧 SID、恢复 Cookie 当前对应的会话，再重试 logout。冷启动尚无内存会话时可以省略该请求头。
 
-并发使用同一个 Refresh Token 时，服务端通过确定性轮换恢复同一个后继 Token，多个浏览器标签页不会因丢失“胜者”响应而被迫退出。最近一代 Refresh Token 在短暂容错窗口结束后再次出现会撤销对应会话；无法识别的更早代或随机 Token 只会被拒绝，不会允许攻击者凭猜测踢掉会话。
+并发使用同一个 Refresh Token 时，服务端通过确定性轮换恢复同一个后继 Token，多个浏览器标签页不会因丢失“胜者”响应而被迫退出。最近一代 Refresh Token 在短暂容错窗口结束后再次出现会撤销对应会话；即使 Redis 拒绝栅栏不可用也必须尝试主库事务撤销，事务失败返回错误而不伪称撤销。无法识别的更早代或随机 Token 只会被拒绝，不会允许攻击者凭猜测踢掉会话。
+
+数据库不可用时，所有 Session 授权和 refresh 均失败关闭：请求返回错误，不签发任何凭据。已识别的 refresh 重放若遇到主库撤销事务失败（例如数据库与 Redis 同时故障），本次重放请求返回错误且得不到新凭据，也不返回“已撤销”；服务不承诺在故障期间持久记录该泄漏事件，恢复后不会自动补做撤销，会话保持原状，其当前代 Refresh Token 继续按原有规则有效。宽限期之外的旧代 Refresh Token 本来就不被接受，故障恢复后再次出现时按既定规则撤销会话。所有者怀疑泄漏时应主动撤销会话（退出登录、撤销其他会话或重置密码）。
 
 前端使用 Web Locks 串行化同一浏览器配置文件中的刷新，并通过 BroadcastChannel（不支持时回退到 `storage` 事件）仅同步会话标识和登录/退出事件；Access Token 与 Refresh Token 都不会通过跨标签页消息传递或持久化到 Web Storage。
 
