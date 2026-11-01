@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from '@tanstack/react-query'
 import {
   createRootRoute,
   createRoute,
@@ -38,6 +42,7 @@ import {
   act,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { AxiosError, type AxiosAdapter } from 'axios'
 import i18n from 'i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
@@ -46,11 +51,13 @@ import type {
   ModelPricingEntry,
 } from '@/features/model-pricing/api'
 import { pricingOptions } from '@/features/model-pricing/pricing'
+import { ModelCard } from '@/features/pricing/components/model-card'
 import { usePricingColumns } from '@/features/pricing/components/pricing-columns'
-import type { PricingModel } from '@/features/pricing/types'
+import type { PricingData, PricingModel } from '@/features/pricing/types'
 import fr from '@/i18n/locales/fr.json'
 import zhCN from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
+import { createAppQueryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
@@ -60,7 +67,7 @@ import {
 import { ModelsDialogs } from '../components/models-dialogs'
 import { ModelsProvider } from '../components/models-provider'
 import { ModelsTable } from '../components/models-table'
-import type { Model } from '../types'
+import type { Model, Vendor } from '../types'
 
 const metadata: Model = {
   id: 7,
@@ -84,6 +91,7 @@ const channel: Model = {
   sync_official: 0,
 }
 const clients: QueryClient[] = []
+const originalAdapter = api.defaults.adapter
 
 function Page() {
   return (
@@ -120,13 +128,21 @@ async function renderList(
   ],
   options: {
     pricing?: ModelPricingEntry[] | Promise<ModelPricingConfig>
+    square?: PricingData | Error
+    client?: QueryClient
+    realTransport?: boolean
+    vendors?: Vendor[]
     waitForPricing?: boolean
     initialUrl?: string
     total?: number
   } = {}
 ) {
   useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 100 })
-  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+  const originalGet = api.get.bind(api)
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
+    if (url === '/api/pricing' && options.realTransport) {
+      return originalGet(url, config)
+    }
     if (url === '/api/models/' || url === '/api/models/search') {
       return {
         data: {
@@ -137,6 +153,15 @@ async function renderList(
     }
     if (url === '/api/models/7') {
       return { data: { success: true, data: metadata } }
+    }
+    if (url === '/api/pricing') {
+      if (options.square instanceof Error) throw options.square
+      return {
+        data: options.square ?? { success: true, data: [], vendors: [] },
+      }
+    }
+    if (url === '/api/vendors/') {
+      return { data: { success: true, data: { items: options.vendors ?? [] } } }
     }
     if (url === '/api/option/model_pricing') {
       return {
@@ -155,9 +180,14 @@ async function renderList(
     }
     return { data: { success: true, data: { items: [] } } }
   })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
+  const client =
+    options.client ??
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
   clients.push(client)
   const root = createRootRoute()
   const authenticated = createRoute({
@@ -201,6 +231,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup()
+  api.defaults.adapter = originalAdapter
   clients.splice(0).forEach((client) => client.clear())
   useAuthStore.getState().auth.reset()
   useSystemConfigStore
@@ -257,6 +288,478 @@ it('requests channel models and distinguishes catalog policy from availability u
       'No channel is configured. This model will not appear in the model square.'
     )
   ).toBeVisible()
+})
+
+it('shows each model in the square with the same icon in the management list', async () => {
+  const models: PricingModel[] = [
+    {
+      id: 1,
+      model_name: 'gpt-6.1-sol',
+      vendor_id: -1,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+    {
+      id: 2,
+      model_name: 'claude-sonnet-5.5',
+      vendor_id: -2,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+    {
+      id: 3,
+      model_name: 'deepseek-v4.1-flash',
+      vendor_id: -3,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+    {
+      id: 4,
+      model_name: 'nvidia/llama-3',
+      vendor_id: -4,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+    {
+      id: 5,
+      model_name: 'hy3',
+      icon: 'Hunyuan.Color',
+      vendor_id: -5,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+    {
+      id: 6,
+      model_name: 'custom-branded',
+      icon: 'OpenAI',
+      vendor_id: -2,
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: [],
+    },
+  ]
+  const vendors = [
+    { id: -1, name: 'OpenAI', icon: 'OpenAI' },
+    { id: -2, name: 'Anthropic', icon: 'Claude.Color' },
+    { id: -3, name: 'DeepSeek', icon: 'DeepSeek.Color' },
+    { id: -4, name: 'Meta', icon: 'Ollama' },
+    { id: -5, name: 'Tencent', icon: 'Hunyuan.Color' },
+  ]
+  const square: PricingData = {
+    success: true,
+    data: models,
+    vendors,
+    group_ratio: {},
+    usable_group: {},
+    supported_endpoint: {},
+    auto_groups: [],
+  }
+  await renderList(
+    models.map((model) => ({ ...channel, model_name: model.model_name })),
+    { square }
+  )
+  for (const model of models) {
+    const cell = screen
+      .getByRole('button', { name: model.model_name })
+      .closest('td')
+    expect(cell).not.toBeNull()
+    const card = render(
+      <ModelCard
+        model={{
+          ...model,
+          vendor_icon: vendors.find((vendor) => vendor.id === model.vendor_id)
+            ?.icon,
+        }}
+        onClick={() => {}}
+      />
+    )
+    await waitFor(() =>
+      expect(
+        cell?.firstElementChild?.firstElementChild?.querySelector('svg')
+      ).not.toBeNull()
+    )
+    const cardIcon = card.container.querySelector('[aria-hidden="true"]')
+    await waitFor(() => expect(cardIcon?.querySelector('svg')).not.toBeNull())
+    expect(
+      cell?.firstElementChild?.firstElementChild?.querySelector('svg')
+        ?.innerHTML
+    ).toBe(cardIcon?.querySelector('svg')?.innerHTML)
+    card.unmount()
+  }
+})
+
+it('keeps a rule-based metadata icon when its pattern also names a square model', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'gpt-',
+    icon: 'OpenAI',
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  await renderList(
+    [{ ...metadata, model_name: model.model_name, name_rule: 1, icon: 'Wan' }],
+    {
+      square: {
+        success: true,
+        data: [model],
+        vendors: [],
+        group_ratio: {},
+        usable_group: {},
+        supported_endpoint: {},
+        auto_groups: [],
+      },
+    }
+  )
+  const cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  expect(
+    cell?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+})
+
+it('uses a model-specific square icon before the assigned vendor icon', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'gpt-with-custom-icon',
+    icon: 'Wan',
+    vendor_id: 1,
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  await renderList(
+    [{ ...metadata, model_name: model.model_name, vendor_id: 1 }],
+    {
+      square: {
+        success: true,
+        data: [model],
+        vendors: [{ id: 1, name: 'OpenAI', icon: 'OpenAI' }],
+        group_ratio: {},
+        usable_group: {},
+        supported_endpoint: {},
+        auto_groups: [],
+      },
+      vendors: [
+        {
+          id: 1,
+          name: 'OpenAI',
+          icon: 'OpenAI',
+          status: 1,
+          created_time: 1,
+          updated_time: 1,
+        },
+      ],
+    }
+  )
+  const cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  expect(
+    cell?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+})
+
+it('keeps the square initial when its matched vendor has no icon', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'claude-custom',
+    vendor_id: 1,
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  await renderList([{ ...metadata, model_name: model.model_name }], {
+    square: {
+      success: true,
+      data: [model],
+      vendors: [{ id: 1, name: 'Anthropic' }],
+      group_ratio: {},
+      usable_group: {},
+      supported_endpoint: {},
+      auto_groups: [],
+    },
+  })
+  const cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  const icon = cell?.firstElementChild?.firstElementChild
+  expect(icon).toHaveTextContent('C')
+  expect(icon?.querySelector('svg, img')).toBeNull()
+})
+
+it('preserves a configured icon when the model is not in the square', async () => {
+  await renderList([{ ...metadata, model_name: 'claude-custom', icon: 'Wan' }])
+  const cell = screen
+    .getByRole('button', { name: 'claude-custom' })
+    .closest('td')
+  expect(
+    cell?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+  expect(cell).toHaveTextContent('No vendor')
+})
+
+it('prefers an assigned vendor icon to a name-based guess when the model is not in the square', async () => {
+  await renderList([{ ...metadata, model_name: 'gpt-custom', vendor_id: 1 }], {
+    vendors: [
+      {
+        id: 1,
+        name: 'Custom vendor',
+        icon: 'Wan',
+        status: 1,
+        created_time: 1,
+        updated_time: 1,
+      },
+    ],
+  })
+  const cell = screen.getByRole('button', { name: 'gpt-custom' }).closest('td')
+  expect(
+    cell?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+  expect(cell).toHaveTextContent('Custom vendor')
+})
+
+it('uses an explicitly configured model icon after metadata changes', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'saved-icon',
+    icon: 'OpenAI',
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  await renderList(
+    [{ ...metadata, model_name: model.model_name, icon: 'Wan' }],
+    {
+      square: {
+        success: true,
+        data: [model],
+        vendors: [],
+        group_ratio: {},
+        usable_group: {},
+        supported_endpoint: {},
+        auto_groups: [],
+      },
+    }
+  )
+  const cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  expect(
+    cell?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+})
+
+it('updates the displayed icon when square data refreshes', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'catalog-refresh',
+    icon: 'Wan',
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  await renderList([{ ...channel, model_name: model.model_name }], {
+    square: {
+      success: true,
+      data: [model],
+      vendors: [],
+      group_ratio: {},
+      usable_group: {},
+      supported_endpoint: {},
+      auto_groups: [],
+    },
+  })
+  const cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  const icon = cell?.firstElementChild?.firstElementChild
+  expect(icon?.querySelector('img')).toHaveAttribute(
+    'src',
+    expect.stringContaining('wan.png')
+  )
+  act(() => {
+    clients.at(-1)?.setQueryData<PricingData>(
+      ['pricing', 'model-icons'],
+      (previous) =>
+        previous && {
+          ...previous,
+          data: [{ ...model, icon: 'OpenAI' }],
+        }
+    )
+  })
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole('button', { name: model.model_name })
+        .closest('td')
+        ?.firstElementChild?.firstElementChild?.querySelector('svg')
+    ).not.toBeNull()
+  )
+  expect(
+    screen
+      .getByRole('button', { name: model.model_name })
+      .closest('td')
+      ?.firstElementChild?.firstElementChild?.querySelector('img')
+  ).toBeNull()
+})
+
+it.each([401, 500])(
+  'keeps the session and page intact when the optional square request returns HTTP %s',
+  async (status) => {
+    const onInternalServerError = vi.fn()
+    const client = createAppQueryClient(onInternalServerError)
+    client.setDefaultOptions({ queries: { retry: false } })
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      throw new AxiosError(
+        'Request failed',
+        'ERR_BAD_RESPONSE',
+        config,
+        undefined,
+        {
+          data: { success: false },
+          status,
+          statusText: 'Failure',
+          headers: {},
+          config,
+        }
+      )
+    })
+    api.defaults.adapter = adapter
+    await renderList([{ ...channel, model_name: 'gpt-6.1-terra' }], {
+      realTransport: true,
+      client,
+    })
+    expect(adapter).toHaveBeenCalledTimes(1)
+    expect(adapter.mock.calls[0][0].url).toBe('/api/pricing')
+    expect(onInternalServerError).not.toHaveBeenCalled()
+    expect(useAuthStore.getState().auth.user?.id).toBe(1)
+    expect(screen.getByRole('button', { name: 'gpt-6.1-terra' })).toBeVisible()
+  }
+)
+
+it('leaves real square errors visible while the optional icon request fails', async () => {
+  const onInternalServerError = vi.fn()
+  const client = createAppQueryClient(onInternalServerError)
+  client.setDefaultOptions({ queries: { retry: false } })
+  const error = Object.assign(new Error('square unavailable'), {
+    response: { status: 500 },
+  })
+  await renderList([{ ...channel, model_name: 'gpt-6.1-terra' }], {
+    square: error,
+    client,
+  })
+  function SquareError() {
+    const query = useQuery({
+      queryKey: ['pricing'],
+      queryFn: async () => {
+        throw error
+      },
+    })
+    return <span>{query.isError ? 'Square error' : 'Loading square'}</span>
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <SquareError />
+    </QueryClientProvider>
+  )
+  expect(await screen.findByText('Square error')).toBeVisible()
+  expect(onInternalServerError).toHaveBeenCalledOnce()
+})
+
+it('uses the current metadata icon after a square refresh fails', async () => {
+  const model: PricingModel = {
+    id: 1,
+    model_name: 'refresh-failure',
+    icon: 'OpenAI',
+    quota_type: 0,
+    model_ratio: 1,
+    completion_ratio: 1,
+    enable_groups: [],
+  }
+  const options: { square: PricingData | Error } = {
+    square: {
+      success: true,
+      data: [model],
+      vendors: [],
+      group_ratio: {},
+      usable_group: {},
+      supported_endpoint: {},
+      auto_groups: [],
+    },
+  }
+  await renderList([{ ...metadata, model_name: model.model_name }], options)
+  let cell = screen
+    .getByRole('button', { name: model.model_name })
+    .closest('td')
+  await waitFor(() =>
+    expect(
+      cell?.firstElementChild?.firstElementChild?.querySelector('svg')
+    ).not.toBeNull()
+  )
+  options.square = new Error('square unavailable')
+  await act(async () => {
+    const client = clients.at(-1)
+    client?.setQueriesData(
+      { queryKey: ['models', 'list'] },
+      (previous: unknown) => {
+        const response = previous as { data?: { items: Model[] } }
+        return {
+          ...response,
+          data: {
+            ...response.data,
+            items: [{ ...metadata, model_name: model.model_name, icon: 'Wan' }],
+          },
+        }
+      }
+    )
+    await client?.invalidateQueries({ queryKey: ['pricing'] })
+  })
+  await waitFor(() => {
+    cell = screen.getByRole('button', { name: model.model_name }).closest('td')
+    expect(
+      cell?.firstElementChild?.firstElementChild?.querySelector('img')
+    ).toHaveAttribute('src', expect.stringContaining('wan.png'))
+  })
+})
+
+it('uses known model icons if the square request fails and keeps an initial for unknown models', async () => {
+  await renderList(
+    [
+      { ...channel, model_name: 'gpt-6.1-terra' },
+      { ...channel, model_name: 'unknown-custom' },
+    ],
+    { square: new Error('square unavailable') }
+  )
+  const known = screen
+    .getByRole('button', { name: 'gpt-6.1-terra' })
+    .closest('td')
+  const unknown = screen
+    .getByRole('button', { name: 'unknown-custom' })
+    .closest('td')
+  await waitFor(() =>
+    expect(
+      known?.firstElementChild?.firstElementChild?.querySelector('svg')
+    ).not.toBeNull()
+  )
+  expect(unknown?.firstElementChild?.firstElementChild).toHaveTextContent('U')
 })
 
 it('keeps channel rows individually selectable and disables metadata mutations for mixed selection', async () => {

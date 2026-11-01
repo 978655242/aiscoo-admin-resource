@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { DataTablePage, useDataTable } from '@/components/data-table'
 import { ErrorState } from '@/components/error-state'
 import { useModelPricing } from '@/features/model-pricing/api'
+import { getPricingForModelIcons } from '@/features/pricing/api'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import {
@@ -170,6 +171,32 @@ export function ModelsTable() {
   const models = data?.data?.items || []
   const totalCount = data?.data?.total || 0
   const vendorCounts = data?.data?.vendor_counts
+  const squareQuery = useQuery({
+    queryKey: ['pricing', 'model-icons'],
+    // Icon enrichment is optional; keep failures out of the global error handler.
+    queryFn: async ({ signal }) => {
+      try {
+        return requireServerSuccess(await getPricingForModelIcons(signal))
+      } catch {
+        return null
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    enabled: models.length > 0,
+    networkMode: 'always',
+  })
+  const squareIcons = useMemo(() => {
+    const squareVendors = new Map(
+      (squareQuery.data?.vendors ?? []).map((vendor) => [vendor.id, vendor])
+    )
+    return new Map(
+      (squareQuery.data?.data ?? []).map((model) => [
+        model.model_name,
+        model.icon || squareVendors.get(model.vendor_id ?? 0)?.icon,
+      ])
+    )
+  }, [squareQuery.data])
 
   // Columns configuration
   const pricingQuery = useModelPricing(
@@ -181,7 +208,12 @@ export function ModelsTable() {
   let pricingState: 'loading' | 'error' | undefined
   if (pricingQuery.isError) pricingState = 'error'
   else if (pricingQuery.isLoading) pricingState = 'loading'
-  const columns = useModelsColumns(vendors, pricingQuery.data, pricingState)
+  const columns = useModelsColumns(
+    vendors,
+    pricingQuery.data,
+    pricingState,
+    squareIcons
+  )
 
   // React Table instance
   const { table } = useDataTable({
