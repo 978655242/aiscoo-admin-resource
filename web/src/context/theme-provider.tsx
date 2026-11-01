@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createContext, useContext, useEffect } from 'react'
 
-// The admin UI uses a single light theme that matches the official site, so
-// the light/dark/system preference and the appearance presets were removed.
-// Keys written by earlier builds are cleared once so they cannot linger.
+import { readZenPlanDisplayContext } from '@/features/zen/display-context'
+
+// The admin UI uses a single light theme. Keys written by earlier builds are
+// cleared once so they cannot linger.
 const LEGACY_THEME_STORAGE_KEYS = [
   'newapi:theme:v1:mode',
   'newapi:theme:v1:preset',
@@ -31,7 +32,7 @@ const LEGACY_THEME_STORAGE_KEYS = [
 ]
 
 type ThemeProviderState = {
-  resolvedTheme: 'light'
+  resolvedTheme: 'light' | 'dark'
 }
 
 const ThemeContext = createContext<ThemeProviderState>({
@@ -39,22 +40,23 @@ const ThemeContext = createContext<ThemeProviderState>({
 })
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  // ZEN: 全局浅色主题曾覆盖桌面传入的深色；仅套餐页使用经过验证的展示上下文。
+  const resolvedTheme = readZenPlanDisplayContext()?.theme ?? 'light'
   useEffect(() => {
     const root = document.documentElement
-    root.classList.remove('dark')
-    root.classList.add('light')
+    root.classList.remove('light', 'dark')
+    root.classList.add(resolvedTheme)
+    root.style.colorScheme = resolvedTheme
     try {
       LEGACY_THEME_STORAGE_KEYS.forEach((key) =>
         window.localStorage.removeItem(key)
       )
     } catch {
-      // Storage can be blocked; the fixed theme does not depend on it.
+      // Storage can be blocked; the theme does not depend on it.
     }
-  }, [])
+  }, [resolvedTheme])
 
-  return (
-    <ThemeContext value={{ resolvedTheme: 'light' }}>{children}</ThemeContext>
-  )
+  return <ThemeContext value={{ resolvedTheme }}>{children}</ThemeContext>
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

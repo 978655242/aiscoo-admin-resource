@@ -781,9 +781,10 @@ For commercial licensing, please contact support@quantumnous.com
   --color-card: #2b2b2b;
   --color-popover: #2b2b2b;
   --color-foreground: var(--color-neutral-300);
+  /* ZEN: 60% 的次要文字在深色卡片上不足 4.5:1，提高不透明度保证可读性。 */
   --color-foreground-subtle: color-mix(
     in oklab,
-    var(--color-neutral-300) 60%,
+    var(--color-neutral-300) 65%,
     transparent
   );
   --color-border: rgba(255, 255, 255, 0.1);
