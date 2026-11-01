@@ -6069,7 +6069,6 @@
     "STARTTLS": "STARTTLS",
     "State changed": "状态已变更",
     "State unchanged: {{status}}": "状态未变化：{{status}}",
-    "Static page describing the platform.": "描述平台的静态页面。",
     "Statistical count": "统计计数",
     "Statistical quota": "统计配额",
     "Statistical tokens": "统计 Token 数",
