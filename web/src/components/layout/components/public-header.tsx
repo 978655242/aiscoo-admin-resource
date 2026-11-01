@@ -57,6 +57,8 @@ export interface PublicHeaderProps {
   showNavigation?: boolean
   showAuthButtons?: boolean
   showNotifications?: boolean
+  /** Span the full viewport width instead of the centered site container (console). */
+  fullWidth?: boolean
   className?: string
 }
 
@@ -66,13 +68,16 @@ export function PublicHeader(props: PublicHeaderProps) {
     showThemeSwitch = true,
     showLanguageSwitcher = true,
     homeUrl = '/',
+    leftContent,
+    fullWidth = false,
     showAuthButtons = true,
     showNotifications = true,
   } = props
 
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [scrolled, setScrolled] = useState(false)
+  const [pageScrolled, setScrolled] = useState(false)
+  const scrolled = pageScrolled && !fullWidth
   const [mobileOpen, setMobileOpen] = useState(false)
   const [authPromptTarget, setAuthPromptTarget] =
     useState<AuthPromptTarget | null>(null)
@@ -204,7 +209,8 @@ export function PublicHeader(props: PublicHeaderProps) {
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-            scrolled ? 'max-w-[52rem] px-3 pt-3' : 'max-w-7xl px-4 pt-0 md:px-6'
+            scrolled && 'max-w-[52rem] px-3 pt-3',
+            !scrolled && (fullWidth ? 'px-2' : 'max-w-7xl px-4 pt-0 md:px-6')
           )}
         >
           <nav
@@ -217,6 +223,7 @@ export function PublicHeader(props: PublicHeaderProps) {
           >
             {/* Logo */}
             <div className='@container/system-brand flex min-w-0 flex-1 items-center gap-1 lg:min-w-36'>
+              {leftContent}
               <Link
                 to={homeUrl}
                 aria-label={systemName}
