@@ -719,6 +719,28 @@ func TestZenAdmissionAllowedRoutesUseOnlyDesignatedFunding(t *testing.T) {
 	assert.Equal(t, "wallet_only", observedUser.GetSetting().BillingPreference, "managed funding must not rewrite native preferences")
 }
 
+func TestZenAdmissionRejectsStaleUserSecurityContext(t *testing.T) {
+	for _, field := range []string{"auth_version", "status"} {
+		t.Run(field, func(t *testing.T) {
+			user, token, _, _ := setupZenAdmissionTest(t)
+			response := httptest.NewRecorder()
+			router := gin.New()
+			router.POST("/v1/responses", func(c *gin.Context) {
+				common.SetContextKey(c, constant.ContextKeyUserAuthVersion, user.AuthVersion)
+				common.SetContextKey(c, constant.ContextKeyUserStatus, common.UserStatusEnabled)
+				_ = admitTokenPurpose(c, token)
+			})
+			value := any(user.AuthVersion + 1)
+			if field == "status" {
+				value = common.UserStatusDisabled
+			}
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update(field, value).Error)
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+			assert.Equal(t, http.StatusUnauthorized, response.Code)
+		})
+	}
+}
+
 func TestZenAdmissionDeniedMethodPathAndKeyEntrypoints(t *testing.T) {
 	_, token, _, _ := setupZenAdmissionTest(t)
 	for _, entrypoint := range []struct {

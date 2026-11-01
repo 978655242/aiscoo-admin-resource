@@ -161,12 +161,19 @@ func admitTokenPurpose(c *gin.Context, token *model.Token) error {
 		}
 		return abortZenAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "aiscoo zen authentication is temporarily unavailable")
 	}
-	authVersion := c.GetInt64(string(constant.ContextKeyUserAuthVersion))
+	// 上游上下文可能来自旧用户缓存；安全版本和状态必须以主库为准。
+	user, err := model.GetUserById(token.UserId, false)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return abortZenAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "aiscoo zen session is no longer valid")
+		}
+		return abortZenAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "aiscoo zen authentication is temporarily unavailable")
+	}
 	// SessionVersion rotates during an ordinary refresh; it does not revoke the key.
 	if session.UserID != token.UserId || session.ClientPurpose != model.ClientPurposeZen ||
 		session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now ||
-		authVersion <= 0 || session.UserAuthVersion != authVersion ||
-		common.GetContextKeyInt(c, constant.ContextKeyUserStatus) != common.UserStatusEnabled {
+		user.AuthVersion <= 0 || session.UserAuthVersion != user.AuthVersion ||
+		user.Status != common.UserStatusEnabled {
 		return abortZenAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "aiscoo zen session is no longer valid")
 	}
 

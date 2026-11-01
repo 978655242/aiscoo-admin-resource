@@ -140,6 +140,97 @@ func TestUserSessionCacheCannotLoseClientPurpose(t *testing.T) {
 	assert.Equal(t, "xcode", reloaded.ClientPurpose)
 }
 
+func TestSessionAuthorizationRequiresPrimaryDatabaseDespiteCache(t *testing.T) {
+	setupUserSessionTest(t)
+	server := useUserCacheMiniRedis(t)
+	session := newTestUserSession("authoritative-session", 1178, time.Now().Unix())
+	require.NoError(t, CreateUserSession(session))
+	_, err := GetUserSessionCached(session.SID)
+	require.NoError(t, err)
+
+	// 缓存含 active 时数据库失败仍不能授权，避免未知事务结果被当成成功。
+	injected := errors.New("injected session database failure")
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register("session_authority_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_sessions" {
+			tx.AddError(injected)
+		}
+	}))
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, injected)
+	require.NoError(t, DB.Callback().Query().Remove("session_authority_failure"))
+
+	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", session.SID).Updates(map[string]any{
+		"status": UserSessionStatusRevoked, "revoked_at": time.Now().Unix(),
+	}).Error)
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive, "stale active cache cannot override committed revoke")
+	server.SetError("injected Redis outage")
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive)
+	server.SetError("")
+	server.FlushAll()
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive, "Redis recovery cannot revive a session")
+}
+
+func TestSessionRevocationPathsIgnoreStaleActiveCache(t *testing.T) {
+	for _, path := range []string{"single", "refresh logout", "refresh replay", "all", "others"} {
+		t.Run(path, func(t *testing.T) {
+			setupUserSessionTest(t)
+			useUserCacheMiniRedis(t)
+			now := time.Now().Unix()
+			session := newTestUserSession("revoke-"+strings.ReplaceAll(path, " ", "-"), 1179, now)
+			require.NoError(t, CreateUserSession(session))
+			switch path {
+			case "single":
+				revoked, err := RevokeUserSession(session.UserID, session.SID, "test")
+				require.NoError(t, err)
+				require.True(t, revoked)
+			case "refresh logout":
+				revoked, err := RevokeUserSessionByRefreshHash(session.SID, session.RefreshHash, "test")
+				require.NoError(t, err)
+				require.True(t, revoked)
+			case "refresh replay":
+				require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", session.SID).Updates(map[string]any{"previous_refresh_hash": "old", "previous_valid_until": now - 1}).Error)
+				_, err := RotateUserSessionRefresh(session.UserID, session.SID, "old", "next", now, time.Second)
+				require.ErrorIs(t, err, ErrUserSessionRefreshReuse)
+			case "all":
+				count, err := RevokeAllUserSessions(session.UserID, "test")
+				require.NoError(t, err)
+				require.EqualValues(t, 1, count)
+			case "others":
+				count, err := RevokeOtherUserSessions(session.UserID, "other", "test")
+				require.NoError(t, err)
+				require.EqualValues(t, 1, count)
+			}
+			// 模拟另一节点的旧 active 写入及 Redis 重启丢失拒绝栅栏。
+			require.NoError(t, common.RDB.Del(context.Background(), userSessionCacheKey(session.SID)).Err())
+			require.NoError(t, writeUserSessionCache(session.cacheEntry(), UserSessionCacheDeadline()))
+			_, err := GetUserSessionCached(session.SID)
+			assert.ErrorIs(t, err, ErrUserSessionInactive)
+		})
+	}
+}
+
+func TestRefreshReplayRevokesWhenRedisFails(t *testing.T) {
+	setupUserSessionTest(t)
+	server := useUserCacheMiniRedis(t)
+	now := time.Now().Unix()
+	session := newTestUserSession("refresh-reuse-redis-down", 1180, now)
+	require.NoError(t, CreateUserSession(session))
+	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", session.SID).Updates(map[string]any{
+		"previous_refresh_hash": "old", "previous_valid_until": now - 1,
+	}).Error)
+	server.SetError("injected Redis outage")
+	_, err := RotateUserSessionRefresh(session.UserID, session.SID, "old", "new", now, time.Second)
+	require.ErrorIs(t, err, ErrUserSessionRefreshReuse)
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive)
+	server.SetError("")
+	_, err = GetUserSessionCached(session.SID)
+	assert.ErrorIs(t, err, ErrUserSessionInactive)
+}
+
 func TestUserSessionCacheTTLUsesShortCacheWindow(t *testing.T) {
 	setupUserSessionTest(t)
 	server := useUserCacheMiniRedis(t)

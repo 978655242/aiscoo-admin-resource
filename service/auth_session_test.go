@@ -33,7 +33,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}, &model.UserAccessToken{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}, &model.UserAccessToken{}, &model.ZenRevokeOperation{}))
 	model.DB = db
 	common.RedisEnabled = false
 	common.UserSessionActiveLimit = common.DefaultUserSessionActiveLimit
@@ -565,6 +565,30 @@ func TestNativeLiveBundleExpiryAndZenRefreshFence(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied)
 }
 
+func TestLoginSessionRejectsStaleCachedUserSecurity(t *testing.T) {
+	for _, field := range []string{"auth_version", "status"} {
+		t.Run(field, func(t *testing.T) {
+			useTestSessionSecret(t)
+			user := setupAuthSessionTestDB(t)
+			_, clientA, _, clientB := useIndependentAuthSessionRedis(t)
+			common.RDB = clientA
+			bundle, err := CreateLoginSession(user.Id, "password", "", "")
+			require.NoError(t, err)
+			identity, err := ParseAccessToken(bundle.AccessToken)
+			require.NoError(t, err)
+			common.RDB = clientB
+			require.NoError(t, model.PublishUserAuthCache(user.Id))
+			value := any(user.AuthVersion + 1)
+			if field == "status" {
+				value = common.UserStatusDisabled
+			}
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update(field, value).Error)
+			_, _, err = ValidateLoginSession(identity)
+			assert.ErrorIs(t, err, ErrLoginSessionRevoked)
+		})
+	}
+}
+
 func TestIndependentRedisSessionRevokeConvergesAfterCacheTTL(t *testing.T) {
 	useTestSessionSecret(t)
 	user := setupAuthSessionTestDB(t)
@@ -579,13 +603,19 @@ func TestIndependentRedisSessionRevokeConvergesAfterCacheTTL(t *testing.T) {
 	common.RDB = clientB
 	_, _, err = ValidateLoginSession(identity)
 	require.NoError(t, err)
+	// 模拟另一节点缓存填充与撤销并发，保留独立 Redis 的旧 active 快照。
+	snapshot, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	require.NoError(t, model.PublishCreatedUserSession(snapshot, model.UserSessionCacheDeadline()))
 	assert.NotEmpty(t, cachedLoginSessionKey(t, serverB), "node B must hold its own session cache entry")
 
 	common.RDB = clientA
 	require.NoError(t, RevokeByRefreshToken(bundle.RefreshToken, bundle.Session.SID, "logout"))
 
-	serverB.FastForward(3 * time.Second)
 	common.RDB = clientB
+	_, _, err = ValidateLoginSession(identity)
+	assert.ErrorIs(t, err, ErrLoginSessionRevoked, "another node must reject before its active cache expires")
+	serverB.FastForward(3 * time.Second)
 	_, _, err = ValidateLoginSession(identity)
 	assert.ErrorIs(t, err, ErrLoginSessionRevoked)
 }
@@ -604,6 +634,9 @@ func TestIndependentRedisAuthVersionAdvanceConvergesAfterCacheTTL(t *testing.T) 
 	common.RDB = clientB
 	_, _, err = ValidateLoginSession(oldIdentity)
 	require.NoError(t, err)
+	snapshot, err := model.GetUserSessionBySID(bundle.Session.SID)
+	require.NoError(t, err)
+	require.NoError(t, model.PublishCreatedUserSession(snapshot, model.UserSessionCacheDeadline()))
 	cacheKey := cachedLoginSessionKey(t, serverB)
 	version := serverB.HGet(cacheKey, "Version")
 	assert.Equal(t, "1", version, "node B must hold the pre-rotation session version")

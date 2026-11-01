@@ -221,6 +221,35 @@ func zenAuthenticationError(c *gin.Context, err error) {
 	zenAPIError(c, status, code, http.StatusText(status))
 }
 
+func SubmitZenRevokeOperation(c *gin.Context) {
+	zenRevokeOperation(c, false)
+}
+
+func QueryZenRevokeOperation(c *gin.Context) {
+	zenRevokeOperation(c, true)
+}
+
+func zenRevokeOperation(c *gin.Context, query bool) {
+	c.Header("Cache-Control", "no-store")
+	var input service.ZenRevokeOperationRequest
+	if err := common.DecodeJson(c.Request.Body, &input); err != nil {
+		zenAuthenticationError(c, service.ErrRefreshTokenInvalid)
+		return
+	}
+	var result string
+	var err error
+	if query {
+		result, err = service.QueryZenRevokeOperation(input)
+	} else {
+		result, err = service.SubmitZenRevokeOperation(input)
+	}
+	if err != nil {
+		zenAuthenticationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"result": result}})
+}
+
 func zenAuthorizationOrigin(c *gin.Context) (string, bool) {
 	if !common.ZenIntegrationEnabled() {
 		zenAPIError(c, http.StatusNotFound, "XCODE_AUTHORIZATION_DISABLED", "aiscoo zen authorization is disabled")

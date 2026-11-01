@@ -32,6 +32,8 @@ func SetApiRouter(router *gin.Engine) {
 	zenAuthRoute.POST("/token", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.ExchangeZenAuthorizationCode)
 	zenAuthRoute.POST("/refresh", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RefreshZenSession)
 	zenAuthRoute.POST("/logout", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.LogoutZenSession)
+	zenAuthRoute.POST("/revoke-operations", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubmitZenRevokeOperation)
+	zenAuthRoute.POST("/revoke-operations/query", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.QueryZenRevokeOperation)
 	zenControlRoute := apiRouter.Group("/xcode/v1", middleware.DisableCache(), func(c *gin.Context) {
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Next()

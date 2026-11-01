@@ -45,6 +45,9 @@ func cleanupAuthArtifacts() {
 	if err := model.DeleteOldRevokedUserSessions(now.Unix()); err != nil {
 		common.SysError(common.LogText("failed to delete old revoked user sessions: %s", err.Error()))
 	}
+	if err := model.DeleteExpiredZenRevokeOperations(now.Unix()); err != nil {
+		common.SysError(common.LogText("failed to delete expired xcode revoke operations: %s", err.Error()))
+	}
 	if err := model.DeleteExpiredAuthFlows(now); err != nil {
 		common.SysError(common.LogText("failed to delete expired authentication flows: %s", err.Error()))
 	}

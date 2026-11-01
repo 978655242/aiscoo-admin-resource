@@ -157,14 +157,15 @@ func validateLoginSession(identity AuthIdentity, purpose string) (*model.UserSes
 	if session.UserID != identity.UserID || session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now || session.Version != identity.SessionVersion || session.UserAuthVersion != identity.UserAuthVersion {
 		return nil, nil, ErrLoginSessionRevoked
 	}
-	user, err := model.GetUserCache(identity.UserID)
+	// 用户安全版本的 Redis 快照可能跨节点滞后，必须读取主库当前值。
+	currentUser, err := model.GetUserById(identity.UserID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	if user.Status != common.UserStatusEnabled || user.AuthVersion != identity.UserAuthVersion {
+	if currentUser.Status != common.UserStatusEnabled || currentUser.AuthVersion != identity.UserAuthVersion {
 		return nil, nil, ErrLoginSessionRevoked
 	}
-	return session, user, nil
+	return session, currentUser.ToBaseUser(), nil
 }
 
 func loginSessionPurposeMatches(session *model.UserSession, purpose string) bool {
