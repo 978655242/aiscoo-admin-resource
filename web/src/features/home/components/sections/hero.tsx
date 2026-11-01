@@ -22,7 +22,6 @@ import { ArrowRight, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { useStatus } from '@/hooks/use-status'
 
 import { HeroEqualizer } from '../hero-equalizer'
 import { HeroStage } from '../hero-stage'
@@ -48,37 +47,17 @@ const MoreIcon = () => (
 
 export function Hero(props: HeroProps) {
   const { t } = useTranslation()
-  const { status } = useStatus()
-  const docsUrl =
-    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
-
-  const renderDocsButton = () => {
-    const isExternal = docsUrl.startsWith('http')
-    if (isExternal) {
-      return (
-        <Button
-          variant='outline'
-          className='group inline-flex h-[46px] items-center gap-2 rounded-[7px] border-[rgba(180,221,231,0.23)] bg-white/[0.03] px-6 text-sm font-medium text-[#dbe8ed] transition-all hover:-translate-y-0.5 hover:bg-[rgba(180,221,231,0.09)] hover:text-white'
-          render={
-            <a href={docsUrl} target='_blank' rel='noopener noreferrer' />
-          }
-        >
-          <BookOpen className='size-4' />
-          <span>{t('Docs')}</span>
-        </Button>
-      )
-    }
-    return (
-      <Button
-        variant='outline'
-        className='group inline-flex h-[46px] items-center gap-2 rounded-[7px] border-[rgba(180,221,231,0.23)] bg-white/[0.03] px-6 text-sm font-medium text-[#dbe8ed] transition-all hover:-translate-y-0.5 hover:bg-[rgba(180,221,231,0.09)] hover:text-white'
-        render={<Link to={docsUrl} />}
-      >
-        <BookOpen className='size-4' />
-        <span>{t('Docs')}</span>
-      </Button>
-    )
-  }
+  const docsButton = (
+    <Button
+      role='link'
+      variant='outline'
+      className='group inline-flex h-[46px] items-center gap-2 rounded-[7px] border-[rgba(180,221,231,0.23)] bg-white/[0.03] px-6 text-sm font-medium text-[#dbe8ed] transition-all hover:-translate-y-0.5 hover:bg-[rgba(180,221,231,0.09)] hover:text-white'
+      render={<Link to='/docs' />}
+    >
+      <BookOpen className='size-4' />
+      <span>{t('Docs')}</span>
+    </Button>
+  )
 
   const primaryCta =
     'group h-[46px] rounded-[7px] border border-[#f5f0e5] bg-[#f5f0e5] px-6 text-sm font-medium text-[#202c32] shadow-[0_3px_15px_rgba(0,0,0,0.08)] transition-all hover:-translate-y-0.5 hover:bg-[#fffaf0]'
@@ -153,7 +132,7 @@ export function Hero(props: HeroProps) {
                 {t('Go to Dashboard')}
                 <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
               </Button>
-              {renderDocsButton()}
+              {docsButton}
             </>
           ) : (
             <>
@@ -168,7 +147,7 @@ export function Hero(props: HeroProps) {
               >
                 {t('View Pricing')}
               </Button>
-              {renderDocsButton()}
+              {docsButton}
             </>
           )}
         </div>
