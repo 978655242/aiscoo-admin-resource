@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func productionXCodeConfig(apiType string) string {
+func productionZenConfig(apiType string) string {
 	field := "max_tokens"
 	if apiType == "openai-responses" {
 		field = "max_output_tokens"
@@ -36,11 +36,11 @@ func productionXCodeConfig(apiType string) string {
 	return fmt.Sprintf(`{"schema_version":1,"api_type":%q,"model_config":{"enabled":true,"properties":{"requiresMfjsToolSchema":false,"contextWindow":8192,"inputFormat":{"supportsText":true,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":true},"supportsToolCall":true,"supportsJsonSchemaOutput":false,"supportsNativeWebSearch":false,"supportsMidConversationSystem":false},"optionSpecs":{"reasoningLevel":{"values":["off"],"map":"{}"},"maxOutputTokens":{"max":128,"map":%q}}}}`, apiType, fmt.Sprintf(`{"%s": maxOutputTokens}`, field))
 }
 
-func setupXCodeProductionRouter(t *testing.T, observers ...gin.HandlerFunc) (*gin.Engine, model.UserSubscription) {
+func setupZenProductionRouter(t *testing.T, observers ...gin.HandlerFunc) (*gin.Engine, model.UserSubscription) {
 	t.Helper()
 	setupRelayRouterTestDB(t)
 	require.NoError(t, i18n.Init())
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Model{}, &model.UserSession{}, &model.XCodeAuthorization{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.Task{}, &model.Log{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Model{}, &model.UserSession{}, &model.ZenAuthorization{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.Task{}, &model.Log{}))
 	previousMemoryCache, previousRateLimit := common.MemoryCacheEnabled, setting.ModelRequestRateLimitEnabled
 	common.MemoryCacheEnabled, setting.ModelRequestRateLimitEnabled = false, false
 	t.Cleanup(func() {
@@ -49,12 +49,12 @@ func setupXCodeProductionRouter(t *testing.T, observers ...gin.HandlerFunc) (*gi
 	user := model.User{Username: "production-xcode-user", AffCode: "production-xcode-user", Group: "default", Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 777}
 	require.NoError(t, model.DB.Create(&user).Error)
 	now := model.GetDBTimestamp()
-	sub := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeXCode, Source: "admin", Status: "active", StartTime: now - 1, EndTime: now + 3600, AmountTotal: 100, AmountUsed: 7, QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
+	sub := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeZen, Source: "admin", Status: "active", StartTime: now - 1, EndTime: now + 3600, AmountTotal: 100, AmountUsed: 7, QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
 	require.NoError(t, model.DB.Create(&sub).Error)
-	require.NoError(t, model.DB.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
-	require.NoError(t, model.DB.Create(&model.UserSession{SID: "production-xcode-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeXCode, RefreshHash: strings.Repeat("a", 64), LoginMethod: "password", ExpiresAt: now + 3600}).Error)
+	require.NoError(t, model.DB.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
+	require.NoError(t, model.DB.Create(&model.UserSession{SID: "production-xcode-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeZen, RefreshHash: strings.Repeat("a", 64), LoginMethod: "password", ExpiresAt: now + 3600}).Error)
 	for _, token := range []model.Token{
-		{UserId: user.Id, Key: "productionmanagedkey", Status: common.TokenStatusEnabled, UnlimitedQuota: true, ExpiredTime: now + 3600, ClientPurpose: model.ClientPurposeXCode, ClientSessionSID: "production-xcode-session"},
+		{UserId: user.Id, Key: "productionmanagedkey", Status: common.TokenStatusEnabled, UnlimitedQuota: true, ExpiredTime: now + 3600, ClientPurpose: model.ClientPurposeZen, ClientSessionSID: "production-xcode-session"},
 		{UserId: user.Id, Key: "productionnativekey", Status: common.TokenStatusEnabled, UnlimitedQuota: true, ExpiredTime: -1},
 	} {
 		require.NoError(t, model.DB.Create(&token).Error)
@@ -89,7 +89,7 @@ func productionRelayRequest(engine *gin.Engine, path, key, body string, noDispat
 }
 
 func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *testing.T) {
-	engine, sub := setupXCodeProductionRouter(t)
+	engine, sub := setupZenProductionRouter(t)
 	for _, protocol := range []struct{ path, apiType, field string }{
 		{"/v1/chat/completions", "openai-chat-completions", "max_tokens"},
 		{"/v1/messages", "anthropic-messages", "max_tokens"},
@@ -110,7 +110,7 @@ func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *tes
 					}
 					require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: name, ChannelId: channelID, Enabled: reason != "ability-off"}).Error)
 					if reason != "missing" {
-						raw := productionXCodeConfig(protocol.apiType)
+						raw := productionZenConfig(protocol.apiType)
 						switch reason {
 						case "invalid":
 							raw = `{"schema_version":1}`
@@ -121,9 +121,9 @@ func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *tes
 							if protocol.apiType == wrong {
 								wrong = "openai-chat-completions"
 							}
-							raw = productionXCodeConfig(wrong)
+							raw = productionZenConfig(wrong)
 						}
-						require.NoError(t, model.DB.Create(&model.Model{ModelName: name, NameRule: model.NameRuleExact, Status: 1, XCodeConfig: model.LongText(raw)}).Error)
+						require.NoError(t, model.DB.Create(&model.Model{ModelName: name, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(raw)}).Error)
 						if reason == "metadata-disabled" {
 							require.NoError(t, model.DB.Model(&model.Model{}).Where("model_name = ?", name).Update("status", 0).Error)
 						}
@@ -164,7 +164,7 @@ func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *tes
 }
 
 func TestManagedClaimedResponsesAdmissionPrecedesPluginHooksAndReservation(t *testing.T) {
-	engine, sub := setupXCodeProductionRouter(t)
+	engine, sub := setupZenProductionRouter(t)
 	const source = `
 export const meta = {apiVersion:1,key:"production-admission",name:"Admission",version:"1.0.0",author:{name:"Test"},models:["claimed-admission-model"],fetchMode:"per_task",protocols:[{name:"openai_responses",supports:["sync"]}]};
 export function buildSubmitRequest(ctx) { return {url:ctx.baseUrl+"/submit",method:"POST",body:ctx.requestBody}; }
@@ -187,7 +187,7 @@ export const protocols = {openai_responses: {
 	channel := model.Channel{Name: "claimed-admission", Type: constant.ChannelTypeTaskPlugin, Key: "upstream-secret", Status: common.ChannelStatusEnabled, Group: "default", Models: "claimed-admission-model", Setting: common.GetPointer(`{"task_plugin_key":"production-admission"}`)}
 	require.NoError(t, model.DB.Create(&channel).Error)
 	require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: "claimed-admission-model", ChannelId: channel.Id, Enabled: true}).Error)
-	metadata := model.Model{ModelName: "claimed-admission-model", NameRule: model.NameRuleExact, Status: 1, XCodeConfig: model.LongText(productionXCodeConfig("openai-responses"))}
+	metadata := model.Model{ModelName: "claimed-admission-model", NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig("openai-responses"))}
 	require.NoError(t, model.DB.Create(&metadata).Error)
 	for _, tc := range []struct {
 		name, config, limit, key string
@@ -196,13 +196,13 @@ export const protocols = {openai_responses: {
 		pluginReached            bool
 	}{
 		{"missing metadata", "", `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
-		{"disabled metadata", strings.Replace(productionXCodeConfig("openai-responses"), `"enabled":true`, `"enabled":false`, 1), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
-		{"wrong protocol", productionXCodeConfig("openai-chat-completions"), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
-		{"absent output bound", productionXCodeConfig("openai-responses"), "", "productionmanagedkey", 400, "invalid_request", false},
-		{"excessive output bound", productionXCodeConfig("openai-responses"), `,"max_output_tokens":129`, "productionmanagedkey", 400, "invalid_request", false},
-		{"native safety bound", productionXCodeConfig("openai-responses"), `,"max_output_tokens":1073741824`, "productionmanagedkey", 400, "invalid_request", false},
-		{"valid declared managed model", productionXCodeConfig("openai-responses"), `,"max_output_tokens":128`, "productionmanagedkey", 400, "", true},
-		{"explicit zero retained", productionXCodeConfig("openai-responses"), `,"max_output_tokens":0`, "productionmanagedkey", 400, "", true},
+		{"disabled metadata", strings.Replace(productionZenConfig("openai-responses"), `"enabled":true`, `"enabled":false`, 1), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
+		{"wrong protocol", productionZenConfig("openai-chat-completions"), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
+		{"absent output bound", productionZenConfig("openai-responses"), "", "productionmanagedkey", 400, "invalid_request", false},
+		{"excessive output bound", productionZenConfig("openai-responses"), `,"max_output_tokens":129`, "productionmanagedkey", 400, "invalid_request", false},
+		{"native safety bound", productionZenConfig("openai-responses"), `,"max_output_tokens":1073741824`, "productionmanagedkey", 400, "invalid_request", false},
+		{"valid declared managed model", productionZenConfig("openai-responses"), `,"max_output_tokens":128`, "productionmanagedkey", 400, "", true},
+		{"explicit zero retained", productionZenConfig("openai-responses"), `,"max_output_tokens":0`, "productionmanagedkey", 400, "", true},
 		{"native without metadata or output bound", "", "", "productionnativekey", 400, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,7 +286,7 @@ export const protocols = {openai_responses: {
 		ordinary.SetSetting(kitdto.ChannelSettings{PassThroughBodyEnabled: true})
 		require.NoError(t, model.DB.Create(&ordinary).Error)
 		require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: "claimed-admission-model", ChannelId: ordinary.Id, Enabled: true, Priority: ordinary.Priority}).Error)
-		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionXCodeConfig("openai-responses")).Error)
+		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionZenConfig("openai-responses")).Error)
 		for _, tc := range []struct{ name, extra, input, key string }{
 			{name: "background rejected", extra: `,"background":true`, input: "hello", key: "productionmanagedkey"},
 			{name: "stream rejected", extra: `,"stream":true`, input: "hello", key: "productionmanagedkey"},
@@ -321,7 +321,7 @@ export const protocols = {openai_responses: {
 		t.Run(fmt.Sprintf("successful plugin dispatch/managed=%t", managed), func(t *testing.T) {
 			key, limit, raw := "productionnativekey", "", ""
 			if managed {
-				key, limit, raw = "productionmanagedkey", `,"max_output_tokens":1`, productionXCodeConfig("openai-responses")
+				key, limit, raw = "productionmanagedkey", `,"max_output_tokens":1`, productionZenConfig("openai-responses")
 			}
 			require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", raw).Error)
 			before := submissions.Load()
@@ -338,7 +338,7 @@ export const protocols = {openai_responses: {
 			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), persisted.Status)
 			if managed {
 				var reservation model.SubscriptionPreConsumeRecord
-				require.NoError(t, model.DB.Where("user_id = ? AND funding_scope = ?", sub.UserId, model.SubscriptionUsageScopeXCode).First(&reservation).Error)
+				require.NoError(t, model.DB.Where("user_id = ? AND funding_scope = ?", sub.UserId, model.SubscriptionUsageScopeZen).First(&reservation).Error)
 				assert.Equal(t, sub.Id, reservation.UserSubscriptionId)
 				assert.Equal(t, "settled", reservation.Status)
 				assert.Zero(t, reservation.FinalQuota)
@@ -351,7 +351,7 @@ export const protocols = {openai_responses: {
 		previousRetries := common.RetryTimes
 		common.RetryTimes = 1
 		t.Cleanup(func() { common.RetryTimes = previousRetries })
-		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionXCodeConfig("openai-responses")).Error)
+		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionZenConfig("openai-responses")).Error)
 		response := productionRelayRequest(engine, "/v1/responses", "productionmanagedkey", `{"model":"claimed-admission-model","input":"paid-retry","max_output_tokens":1}`, false)
 		assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "XCODE_QUOTA_EXHAUSTED")
@@ -364,7 +364,7 @@ export const protocols = {openai_responses: {
 
 func TestPinnedSharedEndpointEnforcesTokenModelLimits(t *testing.T) {
 	var originPinSeen bool
-	engine, sub := setupXCodeProductionRouter(t, func(c *gin.Context) {
+	engine, sub := setupZenProductionRouter(t, func(c *gin.Context) {
 		c.Next()
 		pin, found, _ := service.GetChannelConstraints(c).ResolvedPin()
 		originPinSeen = found && pin.Source == dto.PinSourceOriginTask
@@ -418,7 +418,7 @@ export const protocols = {openai_responses: {
 		require.NoError(t, model.DB.Create(channel).Error)
 		require.NoError(t, channel.AddAbilities(model.DB))
 	}
-	require.NoError(t, model.DB.Create(&model.Model{ModelName: modelName, NameRule: model.NameRuleExact, Status: 1, XCodeConfig: model.LongText(productionXCodeConfig("openai-responses"))}).Error)
+	require.NoError(t, model.DB.Create(&model.Model{ModelName: modelName, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig("openai-responses"))}).Error)
 	require.NoError(t, model.DB.Create(&model.Task{TaskID: "origin-limit-task", UserId: sub.UserId, ChannelId: plugin.Id, Platform: constant.TaskPlatform(pluginKey), Status: model.TaskStatusSuccess}).Error)
 	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", sub.UserId).Update("role", common.RoleAdminUser).Error)
 
@@ -444,7 +444,7 @@ export const protocols = {openai_responses: {
 			}{
 				{name: "administrator pins ordinary channel", key: "productionnativekey", channelID: ordinary.Id},
 				{name: "origin task pins plugin channel", key: "productionnativekey", wantPlugin: true},
-				{name: "XCode pins plugin channel", key: "productionmanagedkey", channelID: plugin.Id, wantPlugin: true},
+				{name: "aiscoo zen pins plugin channel", key: "productionmanagedkey", channelID: plugin.Id, wantPlugin: true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					priority := int64(100)
@@ -499,7 +499,7 @@ export const protocols = {openai_responses: {
 }
 
 func TestManagedProductionAdmissionPreservesBodySizePrecedence(t *testing.T) {
-	engine, _ := setupXCodeProductionRouter(t)
+	engine, _ := setupZenProductionRouter(t)
 	previousLimit := constant.MaxRequestBodyMB
 	constant.MaxRequestBodyMB = 1
 	t.Cleanup(func() { constant.MaxRequestBodyMB = previousLimit })
@@ -526,7 +526,7 @@ func TestManagedProductionAdmissionPreservesBodySizePrecedence(t *testing.T) {
 }
 
 func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testing.T) {
-	engine, sub := setupXCodeProductionRouter(t)
+	engine, sub := setupZenProductionRouter(t)
 	service.InitHttpClient()
 	previousRatios := ratio_setting.ModelRatio2JSONString()
 	previousCountToken, previousBatch, previousLog := constant.CountToken, common.BatchUpdateEnabled, common.LogConsumeEnabled
@@ -583,7 +583,7 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		channel := model.Channel{Name: protocol.name, Type: constant.ChannelTypeOpenAI, Key: "upstream-secret", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled, Group: "default", Models: protocol.name}
 		require.NoError(t, model.DB.Create(&channel).Error)
 		require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: protocol.name, ChannelId: channel.Id, Enabled: true}).Error)
-		require.NoError(t, model.DB.Create(&model.Model{ModelName: protocol.name, NameRule: model.NameRuleExact, Status: 1, XCodeConfig: model.LongText(productionXCodeConfig(protocol.apiType))}).Error)
+		require.NoError(t, model.DB.Create(&model.Model{ModelName: protocol.name, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig(protocol.apiType))}).Error)
 		for _, managed := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/managed=%t", protocol.apiType, managed), func(t *testing.T) {
 				key, limit := "productionnativekey", ""
@@ -653,7 +653,7 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		assert.Equal(t, int32(2), newGroupCalls.Load())
 	})
 	var reservations []model.SubscriptionPreConsumeRecord
-	require.NoError(t, model.DB.Where("user_id = ? AND funding_scope = ?", sub.UserId, model.SubscriptionUsageScopeXCode).Find(&reservations).Error)
+	require.NoError(t, model.DB.Where("user_id = ? AND funding_scope = ?", sub.UserId, model.SubscriptionUsageScopeZen).Find(&reservations).Error)
 	require.Len(t, reservations, 3, "each successful managed HTTP request, including the retry, has one designated funding fact")
 	for _, reservation := range reservations {
 		assert.Equal(t, sub.Id, reservation.UserSubscriptionId)

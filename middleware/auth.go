@@ -499,7 +499,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 		// TokenAuthReadOnly must keep allowing other token states to query read-only
 		// data, such as token usage logs; only explicitly disabled tokens are denied.
-		if token.Status == common.TokenStatusDisabled && token.ClientPurpose != model.ClientPurposeXCode {
+		if token.Status == common.TokenStatusDisabled && token.ClientPurpose != model.ClientPurposeZen {
 			common.ApiErrorStatus(c, http.StatusUnauthorized, errors.New(common.TranslateMessage(c, i18n.MsgTokenStatusUnavailable)))
 			c.Abort()
 			return
@@ -522,8 +522,8 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(common.LogText("TokenAuthReadOnly GetUserCache error for user %d: %v", token.UserId, err))
-			if token.ClientPurpose == model.ClientPurposeXCode {
-				abortXCodeAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "XCode authentication is temporarily unavailable")
+			if token.ClientPurpose == model.ClientPurposeZen {
+				abortZenAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "aiscoo zen authentication is temporarily unavailable")
 				return
 			}
 			common.ApiErrorStatus(c, http.StatusInternalServerError, errors.New(common.TranslateMessage(c, i18n.MsgDatabaseError)))
@@ -531,8 +531,8 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 		if userCache.Status != common.UserStatusEnabled {
-			if token.ClientPurpose == model.ClientPurposeXCode {
-				abortXCodeAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "XCode session is no longer valid")
+			if token.ClientPurpose == model.ClientPurposeZen {
+				abortZenAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "aiscoo zen session is no longer valid")
 				return
 			}
 			common.ApiErrorStatus(c, http.StatusForbidden, errors.New(common.TranslateMessage(c, i18n.MsgAuthUserBanned)))
@@ -610,8 +610,8 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 		if err != nil {
-			if token != nil && token.ClientPurpose == model.ClientPurposeXCode {
-				abortXCodeAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "XCode relay credential is no longer valid")
+			if token != nil && token.ClientPurpose == model.ClientPurposeZen {
+				abortZenAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "aiscoo zen relay credential is no longer valid")
 				return
 			}
 			if errors.Is(err, model.ErrDatabase) {
@@ -644,8 +644,8 @@ func TokenAuth() func(c *gin.Context) {
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(common.LogText("TokenAuth GetUserCache error for user %d: %v", token.UserId, err))
-			if token.ClientPurpose == model.ClientPurposeXCode {
-				abortXCodeAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "XCode authentication is temporarily unavailable")
+			if token.ClientPurpose == model.ClientPurposeZen {
+				abortZenAdmission(c, http.StatusServiceUnavailable, "XCODE_BACKEND_UNAVAILABLE", "aiscoo zen authentication is temporarily unavailable")
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusInternalServerError,
@@ -654,8 +654,8 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
-			if token.ClientPurpose == model.ClientPurposeXCode {
-				abortXCodeAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "XCode session is no longer valid")
+			if token.ClientPurpose == model.ClientPurposeZen {
+				abortZenAdmission(c, http.StatusUnauthorized, "XCODE_SESSION_INVALID", "aiscoo zen session is no longer valid")
 				return
 			}
 			abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))

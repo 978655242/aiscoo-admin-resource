@@ -40,7 +40,7 @@ const (
 	FilterTaskPluginEndpoint ChannelFilterKind = "task_plugin_endpoint"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
-	FilterXCodeAuthority     ChannelFilterKind = "xcode_authority"
+	FilterZenAuthority       ChannelFilterKind = "xcode_authority"
 )
 
 type ChannelFilter struct {

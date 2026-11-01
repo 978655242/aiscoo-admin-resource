@@ -26,7 +26,7 @@ func TestManagedSettlementWithoutSessionFailsEvenAtZeroDelta(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(nil)
 	for _, quota := range []int{0, 100} {
 		info := &relaycommon.RelayInfo{
-			ClientPurpose:         model.ClientPurposeXCode,
+			ClientPurpose:         model.ClientPurposeZen,
 			FinalPreConsumedQuota: quota,
 		}
 		require.ErrorIs(t, SettleBilling(ctx, info, quota), model.ErrSubscriptionFundingTargetInvalid)

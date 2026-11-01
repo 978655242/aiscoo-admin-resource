@@ -30,9 +30,9 @@ const (
 	AuthFlowPurposeTwoFASetup        = "2fa_setup"
 	AuthFlowPurposeSecurityProof     = "security_proof"
 	AuthFlowPurposeEmailBinding      = "email_binding"
-	AuthFlowPurposeXCodeRequest      = "xcode_authorize"
-	AuthFlowPurposeXCodeCode         = "xcode_code"
-	AuthFlowPurposeXCodeWebHandoff   = "xcode_web_handoff"
+	AuthFlowPurposeZenRequest        = "xcode_authorize"
+	AuthFlowPurposeZenCode           = "xcode_code"
+	AuthFlowPurposeZenWebHandoff     = "xcode_web_handoff"
 	AuthFlowTokenBytes               = 32
 	AuthFlowDefaultCleanupRetention  = 24 * time.Hour
 )

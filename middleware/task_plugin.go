@@ -344,7 +344,7 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 func RouteTaskPluginEndpoint() gin.HandlerFunc {
 	pinEndpoint := PinTaskPluginEndpoint()
 	return func(c *gin.Context) {
-		if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode {
+		if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen {
 			pinEndpoint(c)
 			return
 		}

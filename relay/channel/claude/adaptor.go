@@ -36,7 +36,7 @@ func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayIn
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
 	maxTokens := request.MaxTokens
-	if info.ClientPurpose != model.ClientPurposeXCode && request.MaxTokens != nil && *request.MaxTokens == 0 {
+	if info.ClientPurpose != model.ClientPurposeZen && request.MaxTokens != nil && *request.MaxTokens == 0 {
 		request.MaxTokens = nil
 	}
 	if err := relayconvert.ApplyClaudeThinkingModel(request, info); err != nil {
@@ -49,7 +49,7 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		request.Thinking != nil && request.Thinking.Type == "adaptive" && len(request.Thinking.BlockBinding) == 0 {
 		request.Thinking.BlockBinding = original.Thinking.BlockBinding
 	}
-	if info.ClientPurpose == model.ClientPurposeXCode && maxTokens != nil && *maxTokens == 0 {
+	if info.ClientPurpose == model.ClientPurposeZen && maxTokens != nil && *maxTokens == 0 {
 		request.MaxTokens = maxTokens
 	}
 	if request.MaxTokens == nil {

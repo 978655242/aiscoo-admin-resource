@@ -119,9 +119,9 @@ test('keeps malformed JSON drafts across view switches and associates the form l
   const draft = '{"enabled":'
   render(
     <>
-      <label htmlFor='xcode-json'>aiscoo model JSON</label>
+      <label htmlFor='zen-json'>aiscoo model JSON</label>
       <JsonEditor
-        id='xcode-json'
+        id='zen-json'
         value={draft}
         valueType='any'
         onChange={onChange}

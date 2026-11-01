@@ -125,16 +125,16 @@ func (s *SubscriptionFunding) Settle(actualQuota, totalReservedQuota int) error 
 	if err != nil {
 		return err
 	}
-	if s.target.Scope == model.SubscriptionUsageScopeXCode {
-		return model.SettleXCodeSubscriptionRequest(s.requestId, s.userId, s.subscriptionId, int64(actualQuota))
+	if s.target.Scope == model.SubscriptionUsageScopeZen {
+		return model.SettleZenSubscriptionRequest(s.requestId, s.userId, s.subscriptionId, int64(actualQuota))
 	}
 	return model.PostConsumeUserSubscriptionDelta(s.subscriptionId, int64(delta))
 }
 
 func (s *SubscriptionFunding) Refund() error {
-	if s.target.Scope == model.SubscriptionUsageScopeXCode {
+	if s.target.Scope == model.SubscriptionUsageScopeZen {
 		return refundWithRetry(func() error {
-			return model.RefundXCodeSubscriptionRequest(s.requestId, s.userId, s.subscriptionId)
+			return model.RefundZenSubscriptionRequest(s.requestId, s.userId, s.subscriptionId)
 		})
 	}
 	if s.preConsumed <= 0 {

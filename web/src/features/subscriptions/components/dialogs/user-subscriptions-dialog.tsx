@@ -65,11 +65,11 @@ import {
   invalidateUserSubscription,
   deleteUserSubscription,
   resetUserSubscriptionsByPlan,
-  xcodeAuthorizationQueryKey,
+  zenAuthorizationQueryKey,
 } from '../../api'
 import { formatTimestamp } from '../../lib'
 import type { UserSubscriptionRecord } from '../../types'
-import { XCodeAuthorizationSection } from './xcode-authorization-section'
+import { ZenAuthorizationSection } from './zen-authorization-section'
 
 interface Props {
   open: boolean
@@ -160,7 +160,7 @@ export function UserSubscriptionsDialog(props: Props) {
         queryKey: ['admin-user-subscriptions', userId],
       }),
       queryClient.invalidateQueries({
-        queryKey: xcodeAuthorizationQueryKey(userId),
+        queryKey: zenAuthorizationQueryKey(userId),
       }),
     ])
   }, [queryClient, userId])
@@ -205,7 +205,7 @@ export function UserSubscriptionsDialog(props: Props) {
       subs.some(
         (record) =>
           record.subscription.id === confirmAction.subId &&
-          record.subscription.usage_scope === 'xcode'
+          record.subscription.usage_scope === 'zen'
       )
     ) {
       toast.error(
@@ -289,7 +289,7 @@ export function UserSubscriptionsDialog(props: Props) {
 
           <div className={sideDrawerFormClassName()}>
             {props.open && props.user && (
-              <XCodeAuthorizationSection
+              <ZenAuthorizationSection
                 key={props.user.id}
                 userId={props.user.id}
                 plans={plans}
@@ -386,11 +386,11 @@ export function UserSubscriptionsDialog(props: Props) {
                           </div>
                           <div className='text-muted-foreground text-sm'>
                             {t('Source')}: {sub.source || '-'}
-                            {sub.usage_scope === 'xcode' && (
-                              <p>{t('aiscoo client-only subscription')}</p>
+                            {sub.usage_scope === 'zen' && (
+                              <p>{t('aiscoo zen-only subscription')}</p>
                             )}
                           </div>
-                          {sub.usage_scope === 'xcode' && (
+                          {sub.usage_scope === 'zen' && (
                             <p className='text-muted-foreground mt-1 text-xs'>
                               {t(
                                 'aiscoo subscription history cannot be deleted here. Cancel or revoke it instead; the server checks all references.'
@@ -489,7 +489,7 @@ export function UserSubscriptionsDialog(props: Props) {
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             variant='destructive'
-                            disabled={confirming || sub.usage_scope === 'xcode'}
+                            disabled={confirming || sub.usage_scope === 'zen'}
                             onClick={() =>
                               setConfirmAction({
                                 type: 'delete',

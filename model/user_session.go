@@ -241,11 +241,11 @@ func CheckUserSessionIssuanceWithTx(tx *gorm.DB, userID int) error {
 	return nil
 }
 
-// ValidateXCodeSourceSessionWithTx binds a flow to the expected SID purpose and
+// ValidateZenSourceSessionWithTx binds a flow to the expected SID purpose and
 // auth_version. A positive expectedVersion additionally checks the control token.
-func ValidateXCodeSourceSessionWithTx(tx *gorm.DB, userID int, sid string, authVersion, expectedVersion int64, purpose string) (*User, *UserSession, error) {
+func ValidateZenSourceSessionWithTx(tx *gorm.DB, userID int, sid string, authVersion, expectedVersion int64, purpose string) (*User, *UserSession, error) {
 	if tx == nil || userID <= 0 || sid == "" || authVersion <= 0 || expectedVersion < 0 ||
-		(purpose != ClientPurposeDashboard && purpose != ClientPurposeXCode) {
+		(purpose != ClientPurposeDashboard && purpose != ClientPurposeZen) {
 		return nil, nil, ErrUserSessionInactive
 	}
 	if _, ok := ParseAccessTokenSessionID(sid); ok {
@@ -303,9 +303,9 @@ func ValidateXCodeSourceSessionWithTx(tx *gorm.DB, userID int, sid string, authV
 	return user, &session, nil
 }
 
-// RevokeXCodeUserSession requires current control identity or a matching refresh
+// RevokeZenUserSession requires current control identity or a matching refresh
 // digest. The native previous-token race grace remains valid for logout.
-func RevokeXCodeUserSession(identity *AuthSessionIdentity, sid, presentedHash string) error {
+func RevokeZenUserSession(identity *AuthSessionIdentity, sid, presentedHash string) error {
 	if sid == "" || (identity == nil && presentedHash == "") {
 		return ErrUserSessionInvalid
 	}
@@ -313,7 +313,7 @@ func RevokeXCodeUserSession(identity *AuthSessionIdentity, sid, presentedHash st
 	if err != nil {
 		return err
 	}
-	return revokeXCodeUserSession(candidate.UserID, sid, "xcode_logout", func(user *User, session *UserSession) error {
+	return revokeZenUserSession(candidate.UserID, sid, "xcode_logout", func(user *User, session *UserSession) error {
 		if user.Status != common.UserStatusEnabled || user.AuthVersion != session.UserAuthVersion || session.ExpiresAt <= time.Now().Unix() {
 			return ErrUserSessionInactive
 		}
@@ -346,14 +346,14 @@ func RevokeXCodeUserSession(identity *AuthSessionIdentity, sid, presentedHash st
 	})
 }
 
-// RevokeXCodeSessionForConsumedCode accepts committed issuance evidence, never
+// RevokeZenSessionForConsumedCode accepts committed issuance evidence, never
 // an externally supplied SID. The service must verify the original PKCE proof.
-func RevokeXCodeSessionForConsumedCode(flow *AuthFlow, reason string) error {
+func RevokeZenSessionForConsumedCode(flow *AuthFlow, reason string) error {
 	if flow == nil || flow.Id <= 0 || flow.TokenHash == "" {
 		return ErrAuthFlowInvalid
 	}
 	var recorded AuthFlow
-	if err := DB.Where("id = ? AND token_hash = ? AND purpose = ? AND consumed_at IS NOT NULL", flow.Id, flow.TokenHash, AuthFlowPurposeXCodeCode).First(&recorded).Error; err != nil {
+	if err := DB.Where("id = ? AND token_hash = ? AND purpose = ? AND consumed_at IS NOT NULL", flow.Id, flow.TokenHash, AuthFlowPurposeZenCode).First(&recorded).Error; err != nil {
 		return err
 	}
 	var binding struct {
@@ -365,15 +365,15 @@ func RevokeXCodeSessionForConsumedCode(flow *AuthFlow, reason string) error {
 	if recorded.UserId <= 0 || binding.IssuedSessionSID == "" {
 		return ErrAuthFlowInvalid
 	}
-	return revokeXCodeUserSession(recorded.UserId, binding.IssuedSessionSID, reason, nil)
+	return revokeZenUserSession(recorded.UserId, binding.IssuedSessionSID, reason, nil)
 }
 
-func disableXCodeManagedTokensWithTx(tx *gorm.DB, userID int, sids []string) error {
+func disableZenManagedTokensWithTx(tx *gorm.DB, userID int, sids []string) error {
 	if tx == nil || userID <= 0 || len(sids) == 0 {
 		return ErrUserSessionInvalid
 	}
 	var tokens []Token
-	if err := tx.Unscoped().Where("user_id = ? AND client_purpose = ? AND client_session_sid IN ?", userID, ClientPurposeXCode, sids).Find(&tokens).Error; err != nil {
+	if err := tx.Unscoped().Where("user_id = ? AND client_purpose = ? AND client_session_sid IN ?", userID, ClientPurposeZen, sids).Find(&tokens).Error; err != nil {
 		return err
 	}
 	for i := range tokens {
@@ -382,11 +382,11 @@ func disableXCodeManagedTokensWithTx(tx *gorm.DB, userID int, sids []string) err
 		}
 	}
 	return tx.Unscoped().Model(&Token{}).
-		Where("user_id = ? AND client_purpose = ? AND client_session_sid IN ?", userID, ClientPurposeXCode, sids).
+		Where("user_id = ? AND client_purpose = ? AND client_session_sid IN ?", userID, ClientPurposeZen, sids).
 		Update("status", common.TokenStatusDisabled).Error
 }
 
-func revokeXCodeUserSession(userID int, sid, reason string, authorize func(*User, *UserSession) error) error {
+func revokeZenUserSession(userID int, sid, reason string, authorize func(*User, *UserSession) error) error {
 	var session UserSession
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
@@ -396,7 +396,7 @@ func revokeXCodeUserSession(userID int, sid, reason string, authorize func(*User
 		if err := lockForUpdate(tx).Where("sid = ? AND user_id = ?", sid, userID).First(&session).Error; err != nil {
 			return err
 		}
-		if session.ClientPurpose != ClientPurposeXCode {
+		if session.ClientPurpose != ClientPurposeZen {
 			return ErrUserSessionInvalid
 		}
 		if authorize != nil {
@@ -408,7 +408,7 @@ func revokeXCodeUserSession(userID int, sid, reason string, authorize func(*User
 		if err := writeUserSessionDenyFence(&session, UserSessionStatusRevoking, now, reason); err != nil {
 			return err
 		}
-		if err := disableXCodeManagedTokensWithTx(tx, userID, []string{sid}); err != nil {
+		if err := disableZenManagedTokensWithTx(tx, userID, []string{sid}); err != nil {
 			return err
 		}
 		if err := tx.Model(&UserSession{}).Where("sid = ? AND user_id = ?", sid, userID).Updates(map[string]any{
@@ -523,7 +523,7 @@ func getUserSessionCache(sid string) (*userSessionCacheEntry, error) {
 	if entry.CacheSchema != userSessionCacheSchema || entry.SID != sid || entry.UserID <= 0 || entry.Version <= 0 || entry.UserAuthVersion <= 0 {
 		return nil, fmt.Errorf("user session cache schema is stale")
 	}
-	if entry.ClientPurpose != ClientPurposeDashboard && entry.ClientPurpose != ClientPurposeXCode {
+	if entry.ClientPurpose != ClientPurposeDashboard && entry.ClientPurpose != ClientPurposeZen {
 		return nil, fmt.Errorf("user session cache purpose is invalid")
 	}
 	if entry.Status != UserSessionStatusActive || entry.RevokedAt != 0 || entry.ExpiresAt <= time.Now().Unix() {
@@ -800,8 +800,8 @@ func RotateUserSessionRefresh(userID int, sid, presentedHash, nextHash string, n
 			if result.RowsAffected == 0 {
 				return ErrUserSessionInactive
 			}
-			if session.ClientPurpose == ClientPurposeXCode {
-				return disableXCodeManagedTokensWithTx(tx, userID, []string{sid})
+			if session.ClientPurpose == ClientPurposeZen {
+				return disableZenManagedTokensWithTx(tx, userID, []string{sid})
 			}
 			return nil
 		})
@@ -856,8 +856,8 @@ func RevokeUserSession(userID int, sid, reason string) (bool, error) {
 			return result.Error
 		}
 		revoked = result.RowsAffected == 1
-		if revoked && current.ClientPurpose == ClientPurposeXCode {
-			return disableXCodeManagedTokensWithTx(tx, userID, []string{sid})
+		if revoked && current.ClientPurpose == ClientPurposeZen {
+			return disableZenManagedTokensWithTx(tx, userID, []string{sid})
 		}
 		return nil
 	})
@@ -918,8 +918,8 @@ func RevokeUserSessionByRefreshHash(sid, presentedHash, reason string) (bool, er
 			session.RevokedAt = now
 			session.RevokedReason = reason
 		}
-		if revoked && session.ClientPurpose == ClientPurposeXCode {
-			if err := disableXCodeManagedTokensWithTx(tx, session.UserID, []string{sid}); err != nil {
+		if revoked && session.ClientPurpose == ClientPurposeZen {
+			if err := disableZenManagedTokensWithTx(tx, session.UserID, []string{sid}); err != nil {
 				return err
 			}
 		}
@@ -1033,11 +1033,11 @@ func revokeUserSessions(userID int, excludedSID, reason string) (int64, error) {
 				return nil
 			}
 			lockedSIDs := make([]string, 0, len(revoked))
-			xcodeSIDs := make([]string, 0, len(revoked))
+			zenSIDs := make([]string, 0, len(revoked))
 			for i := range revoked {
 				lockedSIDs = append(lockedSIDs, revoked[i].SID)
-				if revoked[i].ClientPurpose == ClientPurposeXCode {
-					xcodeSIDs = append(xcodeSIDs, revoked[i].SID)
+				if revoked[i].ClientPurpose == ClientPurposeZen {
+					zenSIDs = append(zenSIDs, revoked[i].SID)
 				}
 			}
 			result := tx.Model(&UserSession{}).Where("sid IN ? AND status = ?", lockedSIDs, UserSessionStatusActive).Updates(map[string]any{
@@ -1049,8 +1049,8 @@ func revokeUserSessions(userID int, excludedSID, reason string) (int64, error) {
 			if result.Error != nil {
 				return result.Error
 			}
-			if affected > 0 && len(xcodeSIDs) > 0 {
-				return disableXCodeManagedTokensWithTx(tx, userID, xcodeSIDs)
+			if affected > 0 && len(zenSIDs) > 0 {
+				return disableZenManagedTokensWithTx(tx, userID, zenSIDs)
 			}
 			return nil
 		})

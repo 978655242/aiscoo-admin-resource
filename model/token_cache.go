@@ -125,10 +125,10 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	if token.Id <= 0 || token.UserId <= 0 || token.CacheSchema != tokenCacheSchema {
 		return nil, fmt.Errorf("token cache is incomplete or stale")
 	}
-	if token.ClientPurpose != ClientPurposeGeneral && token.ClientPurpose != ClientPurposeXCode {
+	if token.ClientPurpose != ClientPurposeGeneral && token.ClientPurpose != ClientPurposeZen {
 		return nil, fmt.Errorf("token cache purpose is invalid")
 	}
-	if (token.ClientPurpose == ClientPurposeXCode) != (token.ClientSessionSID != "") {
+	if (token.ClientPurpose == ClientPurposeZen) != (token.ClientSessionSID != "") {
 		return nil, fmt.Errorf("token cache session binding is invalid")
 	}
 	token.Key = key

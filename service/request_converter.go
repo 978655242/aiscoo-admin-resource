@@ -52,7 +52,7 @@ func ConvertRequestVia(c *gin.Context, info *relaycommon.RelayInfo, request any,
 }
 
 func preserveManagedClaudeMaxTokens(info *relaycommon.RelayInfo, request any, result *relayconvert.RequestResult) {
-	if info == nil || info.ClientPurpose != model.ClientPurposeXCode {
+	if info == nil || info.ClientPurpose != model.ClientPurposeZen {
 		return
 	}
 	claudeRequest, ok := result.Value.(*dto.ClaudeRequest)

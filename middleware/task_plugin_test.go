@@ -2145,9 +2145,9 @@ func TestManagedTaskPluginEndpointRechecksChannelAuthority(t *testing.T) {
 					router := gin.New()
 					router.POST(path, func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, "managed")
-						common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+						common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 						constraints := service.GetChannelConstraints(c)
-						constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterXCodeAuthority, Group: "managed", Model: modelName, RequestPath: path})
+						constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterZenAuthority, Group: "managed", Model: modelName, RequestPath: path})
 						if tc.pinSelected {
 							constraints.AddPin(dto.ChannelPin{ChannelId: selected.Id, Source: dto.PinSourceToken, Rank: dto.PinRankToken})
 						}

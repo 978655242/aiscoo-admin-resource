@@ -42,9 +42,9 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	return abilities, err
 }
 
-// XCodeAvailableAbility excludes stale abilities whose channel is absent or disabled.
+// ZenAvailableAbility excludes stale abilities whose channel is absent or disabled.
 // Only non-secret routing facts participate in catalog revision calculation.
-type XCodeAvailableAbility struct {
+type ZenAvailableAbility struct {
 	Ability
 	ChannelType          int     `json:"channel_type"`
 	ChannelModelMapping  *string `json:"channel_model_mapping"`
@@ -54,7 +54,7 @@ type XCodeAvailableAbility struct {
 
 // RoutingChannel is a read-only projection; malformed settings must not trigger
 // the native getters' repair-and-save of an incomplete channel.
-func (ability XCodeAvailableAbility) RoutingChannel() *Channel {
+func (ability ZenAvailableAbility) RoutingChannel() *Channel {
 	channel := &Channel{Id: ability.ChannelId, Type: ability.ChannelType, ModelMapping: ability.ChannelModelMapping, Setting: ability.ChannelSetting, OtherSettings: ability.ChannelOtherSettings}
 	var setting relayDTO.ChannelSettings
 	if channel.Setting != nil && common.UnmarshalJsonStr(*channel.Setting, &setting) != nil {
@@ -67,36 +67,36 @@ func (ability XCodeAvailableAbility) RoutingChannel() *Channel {
 	return channel
 }
 
-func xcodeAvailableAbilityQuery(group string) *gorm.DB {
+func zenAvailableAbilityQuery(group string) *gorm.DB {
 	return DB.Table("abilities").
 		Joins("JOIN channels ON channels.id = abilities.channel_id").
 		Where(map[string]any{"abilities.group": group, "abilities.enabled": true}).
 		Where("channels.status = ?", common.ChannelStatusEnabled)
 }
 
-func GetXCodeAvailableAbilities(group string) ([]XCodeAvailableAbility, error) {
-	return scanXCodeAvailableAbilities(xcodeAvailableAbilityQuery(group))
+func GetZenAvailableAbilities(group string) ([]ZenAvailableAbility, error) {
+	return scanZenAvailableAbilities(zenAvailableAbilityQuery(group))
 }
 
-func scanXCodeAvailableAbilities(query *gorm.DB) ([]XCodeAvailableAbility, error) {
-	var abilities []XCodeAvailableAbility
+func scanZenAvailableAbilities(query *gorm.DB) ([]ZenAvailableAbility, error) {
+	var abilities []ZenAvailableAbility
 	err := query.Select("abilities.*, channels.type AS channel_type, channels.model_mapping AS channel_model_mapping, channels.setting AS channel_setting, channels.settings AS channel_other_settings").
 		Scan(&abilities).Error
 	return abilities, err
 }
 
-func GetXCodeAvailableModelAbilities(group, modelID string) ([]XCodeAvailableAbility, error) {
-	candidates, err := scanXCodeAvailableAbilities(xcodeAvailableAbilityQuery(group).Where("abilities.model = ?", modelID))
+func GetZenAvailableModelAbilities(group, modelID string) ([]ZenAvailableAbility, error) {
+	candidates, err := scanZenAvailableAbilities(zenAvailableAbilityQuery(group).Where("abilities.model = ?", modelID))
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(candidates, func(candidate XCodeAvailableAbility) bool {
+	return slices.DeleteFunc(candidates, func(candidate ZenAvailableAbility) bool {
 		return candidate.Group != group || candidate.Model != modelID
 	}), nil
 }
 
-func HasXCodeAvailableModel(group, modelID, requestPath string) (bool, error) {
-	candidates, err := GetXCodeAvailableModelAbilities(group, modelID)
+func HasZenAvailableModel(group, modelID, requestPath string) (bool, error) {
+	candidates, err := GetZenAvailableModelAbilities(group, modelID)
 	if err != nil {
 		return false, err
 	}
@@ -186,7 +186,7 @@ func GetChannel(
 		return nil, err
 	}
 	for _, filter := range filters {
-		if filter.Kind != dto.FilterXCodeAuthority {
+		if filter.Kind != dto.FilterZenAuthority {
 			continue
 		}
 		if filter.Group != group || filter.Model != model {
@@ -251,7 +251,7 @@ func GetChannel(
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	if err == nil {
 		for _, filter := range filters {
-			if filter.Kind == dto.FilterXCodeAuthority {
+			if filter.Kind == dto.FilterZenAuthority {
 				if ok, _ := ChannelSatisfiesFilters(&channel, model, filters); !ok {
 					return nil, nil
 				}
@@ -282,7 +282,7 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 
 	var channels []*Channel
 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
-		if identityFilterRequiresKey(filters) || slices.ContainsFunc(filters, func(filter dto.ChannelFilter) bool { return filter.Kind == dto.FilterXCodeAuthority }) {
+		if identityFilterRequiresKey(filters) || slices.ContainsFunc(filters, func(filter dto.ChannelFilter) bool { return filter.Kind == dto.FilterZenAuthority }) {
 			return nil
 		}
 		return abilities

@@ -109,19 +109,19 @@ func modelManagementRequest(t *testing.T, handler gin.HandlerFunc, method, path 
 	return recorder
 }
 
-const xcodeModelMetadataFixture = `{"schema_version":1,"api_type":"openai-chat-completions","model_config":{"enabled":false,"properties":{"requiresMfjsToolSchema":false,"contextWindow":131072,"inputFormat":{"supportsText":false,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":false},"supportsToolCall":false,"supportsJsonSchemaOutput":false,"supportsNativeWebSearch":false,"supportsMidConversationSystem":false},"optionSpecs":{"reasoningLevel":{"values":["off"],"map":"{}"},"maxOutputTokens":{"max":8192,"map":"{\"max_tokens\": maxOutputTokens}"}}}}`
+const zenModelMetadataFixture = `{"schema_version":1,"api_type":"openai-chat-completions","model_config":{"enabled":false,"properties":{"requiresMfjsToolSchema":false,"contextWindow":131072,"inputFormat":{"supportsText":false,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":false},"supportsToolCall":false,"supportsJsonSchemaOutput":false,"supportsNativeWebSearch":false,"supportsMidConversationSystem":false},"optionSpecs":{"reasoningLevel":{"values":["off"],"map":"{}"},"maxOutputTokens":{"max":8192,"map":"{\"max_tokens\": maxOutputTokens}"}}}}`
 
-func TestXCodeModelMetadataStrictParsing(t *testing.T) {
-	metadata, err := model.ParseXCodeModelMetadata(xcodeModelMetadataFixture)
+func TestZenModelMetadataStrictParsing(t *testing.T) {
+	metadata, err := model.ParseZenModelMetadata(zenModelMetadataFixture)
 	require.NoError(t, err)
 	assert.False(t, metadata.ModelConfig.Enabled)
 	assert.False(t, metadata.ModelConfig.Properties.InputFormat.SupportsText)
 	assert.False(t, metadata.ModelConfig.Properties.SupportsToolCall)
 	encoded, err := common.Marshal(metadata)
 	require.NoError(t, err)
-	assert.JSONEq(t, xcodeModelMetadataFixture, string(encoded), "explicit false must survive catalog serialization")
+	assert.JSONEq(t, zenModelMetadataFixture, string(encoded), "explicit false must survive catalog serialization")
 	for _, apiType := range []string{"anthropic-messages", "openai-chat-completions", "openai-responses"} {
-		_, err := model.ParseXCodeModelMetadata(strings.Replace(xcodeModelMetadataFixture, "openai-chat-completions", apiType, 1))
+		_, err := model.ParseZenModelMetadata(strings.Replace(zenModelMetadataFixture, "openai-chat-completions", apiType, 1))
 		assert.NoError(t, err)
 	}
 	for _, tc := range []struct{ name, old, replacement string }{
@@ -175,23 +175,23 @@ func TestXCodeModelMetadataStrictParsing(t *testing.T) {
 		{"wrong_output", `"max":8192`, `"max":"8192"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := strings.Replace(xcodeModelMetadataFixture, tc.old, tc.replacement, 1)
-			require.NotEqual(t, xcodeModelMetadataFixture, raw)
-			_, err := model.ParseXCodeModelMetadata(raw)
+			raw := strings.Replace(zenModelMetadataFixture, tc.old, tc.replacement, 1)
+			require.NotEqual(t, zenModelMetadataFixture, raw)
+			_, err := model.ParseZenModelMetadata(raw)
 			assert.Error(t, err)
 		})
 	}
-	for _, raw := range []string{"", "null", "[]", `"metadata"`, xcodeModelMetadataFixture + "{}",
-		xcodeModelMetadataFixture + strings.Repeat(" ", 65537-len(xcodeModelMetadataFixture))} {
-		_, err := model.ParseXCodeModelMetadata(raw)
+	for _, raw := range []string{"", "null", "[]", `"metadata"`, zenModelMetadataFixture + "{}",
+		zenModelMetadataFixture + strings.Repeat(" ", 65537-len(zenModelMetadataFixture))} {
+		_, err := model.ParseZenModelMetadata(raw)
 		assert.Error(t, err)
 	}
 	for _, raw := range []string{
-		xcodeModelMetadataFixture + strings.Repeat(" ", 65536-len(xcodeModelMetadataFixture)),
-		strings.Replace(xcodeModelMetadataFixture, `"map":"{}"`, `"map":"`+strings.Repeat("x", 8192)+`"`, 1),
-		strings.Replace(xcodeModelMetadataFixture, `"contextWindow":131072`, `"contextWindow":9007199254740991`, 1),
+		zenModelMetadataFixture + strings.Repeat(" ", 65536-len(zenModelMetadataFixture)),
+		strings.Replace(zenModelMetadataFixture, `"map":"{}"`, `"map":"`+strings.Repeat("x", 8192)+`"`, 1),
+		strings.Replace(zenModelMetadataFixture, `"contextWindow":131072`, `"contextWindow":9007199254740991`, 1),
 	} {
-		_, err := model.ParseXCodeModelMetadata(raw)
+		_, err := model.ParseZenModelMetadata(raw)
 		assert.NoError(t, err)
 	}
 }
@@ -586,18 +586,18 @@ export function parseTaskResult() { return {}; }
 					Data    model.Model
 				}
 				modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", map[string]any{
-					"model_name": "matrix-xcode", "status": 1, "sync_official": 1, "xcode_config": xcodeModelMetadataFixture,
+					"model_name": "matrix-xcode", "status": 1, "sync_official": 1, "xcode_config": zenModelMetadataFixture,
 				}, &created)
 				require.True(t, created.Success)
 				require.Positive(t, created.Data.Id)
-				assert.Equal(t, xcodeModelMetadataFixture, string(created.Data.XCodeConfig))
+				assert.Equal(t, zenModelMetadataFixture, string(created.Data.ZenConfig))
 				read := func() model.Model {
 					var saved model.Model
 					require.NoError(t, db.First(&saved, created.Data.Id).Error)
 					return saved
 				}
-				for _, bad := range []any{nil, true, 1, map[string]any{}, "null", `{}`, strings.Replace(xcodeModelMetadataFixture, `"enabled":false,`, "", 1),
-					xcodeModelMetadataFixture + strings.Repeat(" ", 65537-len(xcodeModelMetadataFixture))} {
+				for _, bad := range []any{nil, true, 1, map[string]any{}, "null", `{}`, strings.Replace(zenModelMetadataFixture, `"enabled":false,`, "", 1),
+					zenModelMetadataFixture + strings.Repeat(" ", 65537-len(zenModelMetadataFixture))} {
 					before := read()
 					var rejected struct{ Success bool }
 					modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{
@@ -613,7 +613,7 @@ export function parseTaskResult() { return {}; }
 					require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "matrix-xcode-invalid").Count(&count).Error)
 					assert.Zero(t, count)
 				}
-				invalid := model.Model{ModelName: "matrix-xcode-domain-invalid", XCodeConfig: "{}", Status: 1}
+				invalid := model.Model{ModelName: "matrix-xcode-domain-invalid", ZenConfig: "{}", Status: 1}
 				require.Error(t, invalid.Insert(), "direct model callers share the trusted validation boundary")
 				invalid = read()
 				invalid.Description = "domain rejection"
@@ -623,7 +623,7 @@ export function parseTaskResult() { return {}; }
 
 				stale := read()
 				staleVersion := model.MetadataRecordVersion(&stale, nil, nil)
-				next := strings.Replace(xcodeModelMetadataFixture, `"enabled":false`, `"enabled":true`, 1)
+				next := strings.Replace(zenModelMetadataFixture, `"enabled":false`, `"enabled":true`, 1)
 				revised := read()
 				require.NoError(t, revised.Update(&next))
 				revised.UpdatedTime = stale.UpdatedTime
@@ -636,7 +636,7 @@ export function parseTaskResult() { return {}; }
 				require.ErrorIs(t, err, model.ErrMetadataSyncConflict)
 				stale.Description = "unrelated stale edit"
 				require.NoError(t, stale.Update(nil))
-				assert.Equal(t, next, string(read().XCodeConfig), "omission must not restore the stale local configuration")
+				assert.Equal(t, next, string(read().ZenConfig), "omission must not restore the stale local configuration")
 				var edited struct {
 					Success bool
 					Data    model.Model
@@ -645,13 +645,13 @@ export function parseTaskResult() { return {}; }
 					"id": current.Id, "model_name": current.ModelName, "description": "omitted patch", "status": 1, "sync_official": 1,
 				}, &edited)
 				require.True(t, edited.Success)
-				assert.Equal(t, next, string(edited.Data.XCodeConfig))
+				assert.Equal(t, next, string(edited.Data.ZenConfig))
 				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/?status_only=true", map[string]any{
 					"id": current.Id, "status": 0, "xcode_config": "",
 				}, &edited)
 				require.True(t, edited.Success)
 				assert.Zero(t, read().Status)
-				assert.Equal(t, next, string(read().XCodeConfig))
+				assert.Equal(t, next, string(read().ZenConfig))
 				current = read()
 				_, err = model.ApplyMetadataSync([]model.MetadataSyncUpdate{{
 					MetadataSyncSelection: model.MetadataSyncSelection{ModelName: current.ModelName, RecordVersion: model.MetadataRecordVersion(&current, nil, nil), Fields: []string{"description", "status"}},
@@ -659,19 +659,19 @@ export function parseTaskResult() { return {}; }
 				}}, nil)
 				require.NoError(t, err)
 				assert.Equal(t, "official description", read().Description)
-				assert.Equal(t, next, string(read().XCodeConfig))
+				assert.Equal(t, next, string(read().ZenConfig))
 				// Exactly 64 KiB must persist too: MySQL TEXT's 65535-byte cap is not enough.
-				full := xcodeModelMetadataFixture + strings.Repeat(" ", 65536-len(xcodeModelMetadataFixture))
+				full := zenModelMetadataFixture + strings.Repeat(" ", 65536-len(zenModelMetadataFixture))
 				current = read()
 				require.NoError(t, current.Update(&full))
-				assert.Equal(t, full, string(read().XCodeConfig))
+				assert.Equal(t, full, string(read().ZenConfig))
 				edited.Data = model.Model{}
 				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{
 					"id": current.Id, "model_name": current.ModelName, "status": 1, "sync_official": 1, "xcode_config": "",
 				}, &edited)
 				require.True(t, edited.Success)
-				assert.Empty(t, read().XCodeConfig)
-				assert.Empty(t, edited.Data.XCodeConfig)
+				assert.Empty(t, read().ZenConfig)
+				assert.Empty(t, edited.Data.ZenConfig)
 			})
 
 			t.Run("square_states_follow_catalog_policy", func(t *testing.T) {

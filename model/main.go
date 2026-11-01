@@ -366,7 +366,7 @@ func migrateDB() error {
 		&Checkin{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
-		&XCodeAuthorization{},
+		&ZenAuthorization{},
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
@@ -515,7 +515,7 @@ func ensureSubscriptionPlanTableSQLite() error {
 	}
 	tableName := "subscription_plans"
 	if !DB.Migrator().HasTable(tableName) {
-		// XCODE: display metadata stays nullable so existing native plans require no backfill.
+		// ZEN: display metadata stays nullable so existing native plans require no backfill.
 		createSQL := `CREATE TABLE ` + "`" + tableName + "`" + ` (
 ` + "`id`" + ` integer,
 ` + "`title`" + ` varchar(128) NOT NULL,
@@ -576,7 +576,7 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "total_amount", DDL: "`total_amount` bigint NOT NULL DEFAULT 0"},
 		{Name: "quota_reset_period", DDL: "`quota_reset_period` varchar(16) DEFAULT 'never'"},
 		{Name: "quota_reset_custom_seconds", DDL: "`quota_reset_custom_seconds` bigint DEFAULT 0"},
-		// XCODE: add the nullable display column without rebuilding existing SQLite plan tables.
+		// ZEN: add the nullable display column without rebuilding existing SQLite plan tables.
 		{Name: "xcode_display", DDL: "`xcode_display` text"},
 		{Name: "created_at", DDL: "`created_at` bigint"},
 		{Name: "updated_at", DDL: "`updated_at` bigint"},

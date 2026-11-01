@@ -40,8 +40,8 @@ import './styles/index.css'
 
 // Ensure VChart theme is initialized before any chart mounts (prevents white default theme flash)
 // VChart theme is driven by our ThemeProvider (html.light/html.dark) via per-chart `theme` prop.
-const isXCodePlansViewer = window.location.pathname === '/xcode/plans'
-if (!isXCodePlansViewer) initializeFrontendCache()
+const isZenPlansViewer = window.location.pathname === '/xcode/plans'
+if (!isZenPlansViewer) initializeFrontendCache()
 installBuildMetadata()
 
 const queryClient = createAppQueryClient(() => {
@@ -72,7 +72,7 @@ if (!rootElement) {
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
-    if (isXCodePlansViewer) return
+    if (isZenPlansViewer) return
     const apply = (name: string) => {
       document.title = name
       const metaTitle = document.querySelector(
@@ -104,7 +104,7 @@ if (!rootElement) {
 })()
 if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement)
-  // XCODE: Native viewer typography is scoped to its page; don't consume admin Font Cookies.
+  // ZEN: Native viewer typography is scoped to its page; don't consume admin Font Cookies.
   const application = (
     <DirectionProvider>
       <RouterProvider router={router} />
@@ -114,7 +114,7 @@ if (!rootElement.innerHTML) {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          {isXCodePlansViewer ? (
+          {isZenPlansViewer ? (
             application
           ) : (
             <FontProvider>{application}</FontProvider>

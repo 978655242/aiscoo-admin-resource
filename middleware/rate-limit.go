@@ -118,7 +118,7 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 	if err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (mark=%s): %v", mark, err))
 		if strings.HasPrefix(c.Request.URL.Path, "/api/xcode/v1/") {
-			writeXCodeControlAuthError(c, err)
+			writeZenControlAuthError(c, err)
 			return
 		}
 		c.Status(http.StatusInternalServerError)
@@ -147,7 +147,7 @@ func writeRateLimited(c *gin.Context, retryAfterSeconds int64) {
 		c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/api/xcode/v1/") {
-		abortXCodeFacadeError(c, http.StatusTooManyRequests, "XCODE_RATE_LIMITED")
+		abortZenFacadeError(c, http.StatusTooManyRequests, "XCODE_RATE_LIMITED")
 		return
 	}
 	c.Status(http.StatusTooManyRequests)

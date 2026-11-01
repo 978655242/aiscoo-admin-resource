@@ -66,7 +66,7 @@ func TestAuthLogoutRejectsRefreshCookieSessionMismatch(t *testing.T) {
 		assert.Equal(t, model.UserSessionStatusActive, stored.Status)
 	}
 
-	require.NoError(t, db.Model(&model.UserSession{}).Where("sid = ?", sessionB.Session.SID).Update("client_purpose", model.ClientPurposeXCode).Error)
+	require.NoError(t, db.Model(&model.UserSession{}).Where("sid = ?", sessionB.Session.SID).Update("client_purpose", model.ClientPurposeZen).Error)
 	for _, handler := range []gin.HandlerFunc{RefreshAuth, AuthLogout} {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
@@ -81,7 +81,7 @@ func TestAuthLogoutRejectsRefreshCookieSessionMismatch(t *testing.T) {
 	}
 	stored, err := model.GetUserSessionBySID(sessionB.Session.SID)
 	require.NoError(t, err)
-	control, _, err := service.IssueXCodeAccessToken(stored)
+	control, _, err := service.IssueZenAccessToken(stored)
 	require.NoError(t, err)
 	recorder = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(recorder)

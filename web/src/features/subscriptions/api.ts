@@ -20,7 +20,7 @@ import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
-  xcodeAuthorizationSnapshotSchema,
+  zenAuthorizationSnapshotSchema,
   type ApiResponse,
   type PlanRecord,
   type PlanPayload,
@@ -32,8 +32,8 @@ import {
   type SubscriptionPayResponse,
   type SubscriptionPayRequest,
   type SelfSubscriptionData,
-  type XCodeAuthorizationSnapshot,
-  type XCodeAuthorizationRequest,
+  type ZenAuthorizationSnapshot,
+  type ZenAuthorizationRequest,
 } from './types'
 
 // ============================================================================
@@ -134,28 +134,28 @@ export async function resetPlanSubscriptions(
   return res.data
 }
 
-export const xcodeAuthorizationQueryKey = (userId: number) =>
-  ['xcode-admin-authorization', userId] as const
+export const zenAuthorizationQueryKey = (userId: number) =>
+  ['zen-admin-authorization', userId] as const
 
-export async function getXCodeAuthorization(
+export async function getZenAuthorization(
   userId: number
-): Promise<XCodeAuthorizationSnapshot> {
+): Promise<ZenAuthorizationSnapshot> {
   const res = await api.get(`/api/xcode/v1/admin/users/${userId}/authorization`)
-  return xcodeAuthorizationSnapshotSchema.parse(
+  return zenAuthorizationSnapshotSchema.parse(
     requireServerSuccess(res.data).data
   )
 }
 
-export async function mutateXCodeAuthorization(
+export async function mutateZenAuthorization(
   userId: number,
-  data: XCodeAuthorizationRequest
-): Promise<XCodeAuthorizationSnapshot> {
+  data: ZenAuthorizationRequest
+): Promise<ZenAuthorizationSnapshot> {
   const res = await api.post(
     `/api/xcode/v1/admin/users/${userId}/authorization`,
     data,
     { singleUseAuthorization: true }
   )
-  return xcodeAuthorizationSnapshotSchema.parse(
+  return zenAuthorizationSnapshotSchema.parse(
     requireServerSuccess(res.data).data
   )
 }

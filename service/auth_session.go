@@ -138,8 +138,8 @@ func ValidateLoginSession(identity AuthIdentity) (*model.UserSession, *model.Use
 	return validateLoginSession(identity, model.ClientPurposeDashboard)
 }
 
-func ValidateXCodeLoginSession(identity AuthIdentity) (*model.UserSession, *model.UserBase, error) {
-	return validateLoginSession(identity, model.ClientPurposeXCode)
+func ValidateZenLoginSession(identity AuthIdentity) (*model.UserSession, *model.UserBase, error) {
+	return validateLoginSession(identity, model.ClientPurposeZen)
 }
 
 func validateLoginSession(identity AuthIdentity, purpose string) (*model.UserSession, *model.UserBase, error) {
@@ -257,8 +257,8 @@ func RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*A
 	return refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, model.ClientPurposeDashboard)
 }
 
-func RefreshXCodeLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*AuthBundle, *model.User, error) {
-	return refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, model.ClientPurposeXCode)
+func RefreshZenLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*AuthBundle, *model.User, error) {
+	return refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, model.ClientPurposeZen)
 }
 
 func refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, purpose string) (*AuthBundle, *model.User, error) {
@@ -274,7 +274,7 @@ func refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, purpose st
 		if errors.Is(err, model.ErrUserSessionInactive) {
 			return nil, nil, ErrLoginSessionRevoked
 		}
-		if purpose == model.ClientPurposeXCode && !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, model.ErrUserSessionInvalid) {
+		if purpose == model.ClientPurposeZen && !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, model.ErrUserSessionInvalid) {
 			return nil, nil, err
 		}
 		return nil, nil, ErrRefreshTokenInvalid
@@ -285,9 +285,9 @@ func refreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent, purpose st
 	if !loginSessionPurposeMatches(session, purpose) {
 		return nil, nil, ErrAuthCredentialScopeDenied
 	}
-	if purpose == model.ClientPurposeXCode {
-		if _, err := model.GetXCodeSessionToken(session.UserID, sid); err != nil {
-			if errors.Is(err, model.ErrXCodeManagedTokenInvalid) {
+	if purpose == model.ClientPurposeZen {
+		if _, err := model.GetZenSessionToken(session.UserID, sid); err != nil {
+			if errors.Is(err, model.ErrZenManagedTokenInvalid) {
 				return nil, nil, ErrLoginSessionRevoked
 			}
 			return nil, nil, err
@@ -477,15 +477,15 @@ func issueSessionBundle(session *model.UserSession, rawRefreshToken string, curr
 	var accessToken string
 	var accessExpiresAt int64
 	var err error
-	if purpose == model.ClientPurposeXCode {
+	if purpose == model.ClientPurposeZen {
 		// Recheck the authoritative managed key for successful and race-recovered refreshes.
-		if _, err := model.GetXCodeSessionToken(session.UserID, session.SID); err != nil {
-			if errors.Is(err, model.ErrXCodeManagedTokenInvalid) {
+		if _, err := model.GetZenSessionToken(session.UserID, session.SID); err != nil {
+			if errors.Is(err, model.ErrZenManagedTokenInvalid) {
 				return nil, ErrLoginSessionRevoked
 			}
 			return nil, err
 		}
-		accessToken, accessExpiresAt, err = IssueXCodeAccessToken(session)
+		accessToken, accessExpiresAt, err = IssueZenAccessToken(session)
 	} else {
 		accessToken, accessExpiresAt, err = issueAccessToken(identity, accessTokenUse, min(time.Now().Add(AccessTokenTTL).Unix(), session.ExpiresAt))
 	}

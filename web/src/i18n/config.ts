@@ -20,7 +20,7 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
-import { readXCodePlanDisplayContext } from '@/features/xcode/display-context'
+import { readZenPlanDisplayContext } from '@/features/zen/display-context'
 
 import {
   convertDetectedLanguage,
@@ -44,8 +44,8 @@ export const resources = {
   zhTW,
 } as const
 
-// XCODE: Native's validated head projection wins over system/Storage language on the first render.
-const nativeDisplay = readXCodePlanDisplayContext()
+// ZEN: Native's validated head projection wins over system/Storage language on the first render.
+const nativeDisplay = readZenPlanDisplayContext()
 
 i18n
   .use(LanguageDetector)

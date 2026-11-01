@@ -154,9 +154,9 @@ func TestPreConsumeBillingRejectsNegativeQuotaBeforeDeduction(t *testing.T) {
 
 func TestManagedPreConsumeRejectsUnmanagedSession(t *testing.T) {
 	for _, info := range []*relaycommon.RelayInfo{
-		{ClientPurpose: model.ClientPurposeXCode, Billing: &recordingBillingSettler{}},
-		{FundingScope: model.SubscriptionUsageScopeXCode, Billing: &recordingBillingSettler{}},
-		{ClientPurpose: model.ClientPurposeXCode, Billing: &BillingSession{funding: &WalletFunding{}}},
+		{ClientPurpose: model.ClientPurposeZen, Billing: &recordingBillingSettler{}},
+		{FundingScope: model.SubscriptionUsageScopeZen, Billing: &recordingBillingSettler{}},
+		{ClientPurpose: model.ClientPurposeZen, Billing: &BillingSession{funding: &WalletFunding{}}},
 	} {
 		apiErr := PreConsumeBilling(nil, 10, info)
 		require.NotNil(t, apiErr)
@@ -252,7 +252,7 @@ func TestRetryReservationDatabaseMatrix(t *testing.T) {
 				common.SetDatabaseTypes(oldMain, oldLog)
 			})
 			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{},
-				&model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.XCodeAuthorization{}))
+				&model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.ZenAuthorization{}))
 			query := "SELECT version()"
 			if dialect.name == common.DatabaseTypeSQLite {
 				query = "SELECT sqlite_version()"
@@ -323,13 +323,13 @@ func TestRetryReservationDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Create(&user).Error)
 					token := model.Token{UserId: user.Id, Key: "highest-retry-key", Name: "highest-retry", RemainQuota: 500, Status: common.TokenStatusEnabled, ExpiredTime: -1}
 					require.NoError(t, db.Create(&token).Error)
-					sub := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeXCode, Status: "active", AmountTotal: 150,
+					sub := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeZen, Status: "active", AmountTotal: 150,
 						QuotaResetPeriodSnapshot: model.SubscriptionResetNever, StartTime: now - 60, EndTime: now + 3600}
 					require.NoError(t, db.Create(&sub).Error)
-					require.NoError(t, db.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
+					require.NoError(t, db.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
 					t.Cleanup(func() {
 						require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.SubscriptionPreConsumeRecord{}).Error)
-						require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.XCodeAuthorization{}).Error)
+						require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.ZenAuthorization{}).Error)
 						require.NoError(t, db.Unscoped().Delete(&sub).Error)
 						require.NoError(t, db.Unscoped().Delete(&token).Error)
 						require.NoError(t, db.Unscoped().Delete(&user).Error)
@@ -337,14 +337,14 @@ func TestRetryReservationDatabaseMatrix(t *testing.T) {
 					ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 					ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 					info := &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: token.Key,
-						RequestId: "highest-retry-request", ClientPurpose: model.ClientPurposeXCode,
-						FundingScope: model.SubscriptionUsageScopeXCode, FundingSubscriptionID: sub.Id,
+						RequestId: "highest-retry-request", ClientPurpose: model.ClientPurposeZen,
+						FundingScope: model.SubscriptionUsageScopeZen, FundingSubscriptionID: sub.Id,
 						FundingAuthorizationRevision: 1, ForcePreConsume: true}
 					require.Nil(t, PreConsumeBilling(ctx, 100, info))
 					if tc.reset {
 						require.NoError(t, db.Model(&sub).Updates(map[string]any{"amount_used": 0, "quota_reset_generation": 2}).Error)
 					}
-					target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: sub.Id, AuthorizationRevision: 1}
+					target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: sub.Id, AuthorizationRevision: 1}
 					for _, retryQuota := range []int{60, 80} {
 						require.Nil(t, PreConsumeBilling(ctx, retryQuota, info))
 						require.NoError(t, db.First(&sub, sub.Id).Error)
@@ -392,15 +392,15 @@ func TestRetryReservationDatabaseMatrix(t *testing.T) {
 				require.NoError(t, db.Create(&token).Error)
 				plan := model.SubscriptionPlan{Title: "retry-xcode", TotalAmount: 100, QuotaResetPeriod: model.SubscriptionResetNever}
 				require.NoError(t, db.Create(&plan).Error)
-				sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeXCode,
+				sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeZen,
 					Source: "admin", Status: "active", AmountTotal: 100, StartTime: now - 60, EndTime: now + 3600,
 					QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
 				require.NoError(t, db.Create(&sub).Error)
-				authorization := model.XCodeAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}
+				authorization := model.ZenAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}
 				require.NoError(t, db.Create(&authorization).Error)
 				t.Cleanup(func() {
 					require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.SubscriptionPreConsumeRecord{}).Error)
-					require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.XCodeAuthorization{}).Error)
+					require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.ZenAuthorization{}).Error)
 					require.NoError(t, db.Unscoped().Delete(&sub).Error)
 					require.NoError(t, db.Unscoped().Delete(&plan).Error)
 					require.NoError(t, db.Unscoped().Delete(&token).Error)
@@ -410,7 +410,7 @@ func TestRetryReservationDatabaseMatrix(t *testing.T) {
 				ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 				info := &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, RequestId: fmt.Sprintf("retry-xcode-%s", dialect.name),
 					OriginModelName: "retry-xcode", ForcePreConsume: true, UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
-					ClientPurpose: model.ClientPurposeXCode, FundingScope: model.SubscriptionUsageScopeXCode,
+					ClientPurpose: model.ClientPurposeZen, FundingScope: model.SubscriptionUsageScopeZen,
 					FundingSubscriptionID: sub.Id, FundingAuthorizationRevision: 1}
 				require.Nil(t, PreConsumeBilling(ctx, 0, info))
 				require.True(t, info.Billing.NeedsRefund())

@@ -105,7 +105,7 @@ func Distribute() func(c *gin.Context) {
 			var preselectedChannelID int
 			if value, exists := c.Get(contextKeyTaskPluginEndpointSelection); exists && !pinned {
 				if selected, ok := value.(taskPluginEndpointSelection); ok && selected.Model == modelRequest.Model && selected.Channel != nil && selected.Channel.Status == common.ChannelStatusEnabled {
-					if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode {
+					if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen {
 						preselectedChannelID = selected.Channel.Id
 					} else if matches, _ := model.ChannelSatisfiesFilters(selected.Channel, modelRequest.Model, constraints.Filters); matches {
 						channel = selected.Channel

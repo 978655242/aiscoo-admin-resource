@@ -76,11 +76,11 @@ func TestNativeErrorDisplayUsesAiscooAndKeepsStableErrorCode(t *testing.T) {
 	response := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(response)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/xcode/web/view", nil)
-	xcodeAPIError(ctx, http.StatusForbidden, "XCODE_PLAN_EXPIRED", "XCode plan is expired")
+	zenAPIError(ctx, http.StatusForbidden, "XCODE_PLAN_EXPIRED", "aiscoo zen plan is expired")
 	var payload map[string]any
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
 	assert.Equal(t, "XCODE_PLAN_EXPIRED", payload["code"])
-	assert.Equal(t, "aiscoo client plan is expired", payload["message"])
+	assert.Equal(t, "aiscoo zen plan is expired", payload["message"])
 	assert.Equal(t, http.StatusForbidden, response.Code)
 }
 
@@ -1141,34 +1141,34 @@ func TestOAuthBindIgnoresLegacyGitHubUsernames(t *testing.T) {
 	}
 }
 
-func setupXCodeAuthTest(t *testing.T) (*model.User, service.AuthIdentity) {
+func setupZenAuthTest(t *testing.T) (*model.User, service.AuthIdentity) {
 	t.Helper()
 	user, identity := setupSecurityEnrollmentTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Token{}))
 	return user, identity
 }
 
-func xcodeAuthorizeInput() service.XCodeAuthorizeRequest {
-	return service.XCodeAuthorizeRequest{
+func zenAuthorizeInput() service.ZenAuthorizeRequest {
+	return service.ZenAuthorizeRequest{
 		ClientID: "xcode-desktop", ResponseType: "code", RedirectURI: "zcode://oauth/callback",
 		State: "deterministic-state-128bits", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256",
 	}
 }
 
-func xcodeCodeForIdentity(t *testing.T, identity service.AuthIdentity, redirects ...string) service.XCodeTokenRequest {
+func zenCodeForIdentity(t *testing.T, identity service.AuthIdentity, redirects ...string) service.ZenTokenRequest {
 	t.Helper()
-	input := xcodeAuthorizeInput()
+	input := zenAuthorizeInput()
 	require.LessOrEqual(t, len(redirects), 1)
 	if len(redirects) == 1 {
 		input.RedirectURI = redirects[0]
 	}
-	flow, err := service.StartXCodeAuthorization(input)
+	flow, err := service.StartZenAuthorization(input)
 	require.NoError(t, err)
-	view, err := service.GetXCodeAuthorizationRequest(flow)
+	view, err := service.GetZenAuthorizationRequest(flow)
 	require.NoError(t, err)
 	assert.Equal(t, "xcode-desktop", view.ClientID)
 	assert.InDelta(t, time.Now().Add(10*time.Minute).Unix(), view.ExpiresAt, 2)
-	redirect, err := service.CompleteXCodeAuthorization(identity, flow)
+	redirect, err := service.CompleteZenAuthorization(identity, flow)
 	require.NoError(t, err)
 	base, _, _ := strings.Cut(redirect, "?")
 	assert.Equal(t, input.RedirectURI, base)
@@ -1180,16 +1180,16 @@ func xcodeCodeForIdentity(t *testing.T, identity service.AuthIdentity, redirects
 	assert.Equal(t, "new-api", callback.Query().Get("provider"))
 	assert.Equal(t, input.State, callback.Query().Get("state"))
 	require.NotEmpty(t, callback.Query().Get("code"))
-	_, err = service.CompleteXCodeAuthorization(identity, flow)
-	assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
-	return service.XCodeTokenRequest{
+	_, err = service.CompleteZenAuthorization(identity, flow)
+	assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
+	return service.ZenTokenRequest{
 		GrantType: "authorization_code", ClientID: input.ClientID, RedirectURI: input.RedirectURI,
 		Code: callback.Query().Get("code"), CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 	}
 }
 
-func TestXCodeAuthorizationRejectsInvalidProtocol(t *testing.T) {
-	setupXCodeAuthTest(t)
+func TestZenAuthorizationRejectsInvalidProtocol(t *testing.T) {
+	setupZenAuthTest(t)
 	for _, test := range []struct{ field, value string }{
 		{"client", "other"}, {"response", "token"}, {"redirect", "zcode://oauth/callback/"},
 		{"redirect", "zcode://oauth/callback?extra=1"}, {"redirect", "ZCODE://oauth/callback"},
@@ -1199,7 +1199,7 @@ func TestXCodeAuthorizationRejectsInvalidProtocol(t *testing.T) {
 		{"challenge", strings.Repeat("a", 42) + "="}, {"challenge", strings.Repeat("a", 42) + "B"},
 	} {
 		t.Run(test.field+"/"+test.value, func(t *testing.T) {
-			input := xcodeAuthorizeInput()
+			input := zenAuthorizeInput()
 			switch test.field {
 			case "client":
 				input.ClientID = test.value
@@ -1214,8 +1214,8 @@ func TestXCodeAuthorizationRejectsInvalidProtocol(t *testing.T) {
 			case "challenge":
 				input.CodeChallenge = test.value
 			}
-			flow, err := service.StartXCodeAuthorization(input)
-			assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
+			flow, err := service.StartZenAuthorization(input)
+			assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
 			assert.Empty(t, flow)
 		})
 	}
@@ -1224,45 +1224,45 @@ func TestXCodeAuthorizationRejectsInvalidProtocol(t *testing.T) {
 	assert.Zero(t, count, "invalid requests must not create anonymous flows")
 }
 
-func TestXCodeDesktopRegisteredRedirectsRemainCodeBound(t *testing.T) {
+func TestZenDesktopRegisteredRedirectsRemainCodeBound(t *testing.T) {
 	redirects := []string{"aiscoo://oauth/callback", "aiscoo-dev://oauth/callback", "aiscoo-preview://oauth/callback", "zcode://oauth/callback"}
 	for _, redirect := range redirects {
 		t.Run(redirect, func(t *testing.T) {
-			_, identity := setupXCodeAuthTest(t)
+			_, identity := setupZenAuthTest(t)
 			for _, method := range []string{"plain", ""} {
-				request := xcodeAuthorizeInput()
+				request := zenAuthorizeInput()
 				request.RedirectURI, request.CodeChallengeMethod = redirect, method
-				flow, err := service.StartXCodeAuthorization(request)
-				assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
+				flow, err := service.StartZenAuthorization(request)
+				assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
 				assert.Empty(t, flow)
 			}
-			input := xcodeCodeForIdentity(t, identity, redirect)
+			input := zenCodeForIdentity(t, identity, redirect)
 			for _, other := range redirects {
 				if other == redirect {
 					continue
 				}
 				wrong := input
 				wrong.RedirectURI = other
-				bundle, err := service.ExchangeXCodeAuthorizationCode(wrong, "", "")
-				assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid, "code is bound to %s, not %s", redirect, other)
+				bundle, err := service.ExchangeZenAuthorizationCode(wrong, "", "")
+				assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid, "code is bound to %s, not %s", redirect, other)
 				assert.Nil(t, bundle)
 			}
 			wrong := input
 			wrong.ClientID, wrong.RedirectURI = "xwork-cli", "http://127.0.0.1:49152/oauth/callback"
-			_, err := service.ExchangeXCodeAuthorizationCode(wrong, "", "")
-			assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+			_, err := service.ExchangeZenAuthorizationCode(wrong, "", "")
+			assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 			wrong = input
 			wrong.CodeVerifier = strings.Repeat("a", 43)
-			_, err = service.ExchangeXCodeAuthorizationCode(wrong, "", "")
-			assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+			_, err = service.ExchangeZenAuthorizationCode(wrong, "", "")
+			assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 			var keys int64
 			require.NoError(t, model.DB.Model(&model.Token{}).Count(&keys).Error)
 			assert.Zero(t, keys, "failed proofs must not issue credentials or consume the code")
-			bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "desktop-identity-test")
+			bundle, err := service.ExchangeZenAuthorizationCode(input, "", "desktop-identity-test")
 			require.NoError(t, err)
 			assert.Equal(t, "xcode-desktop", bundle.Session.ClientID)
-			assert.Equal(t, model.ClientPurposeXCode, bundle.Session.ClientPurpose)
-			control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+			assert.Equal(t, model.ClientPurposeZen, bundle.Session.ClientPurpose)
+			control, err := service.ParseZenAccessToken(bundle.AccessToken)
 			require.NoError(t, err)
 			for _, other := range redirects {
 				if other == redirect {
@@ -1270,14 +1270,14 @@ func TestXCodeDesktopRegisteredRedirectsRemainCodeBound(t *testing.T) {
 				}
 				wrong := input
 				wrong.RedirectURI = other
-				_, err := service.ExchangeXCodeAuthorizationCode(wrong, "", "")
-				assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+				_, err := service.ExchangeZenAuthorizationCode(wrong, "", "")
+				assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 			}
-			_, _, err = service.ValidateXCodeLoginSession(control)
+			_, _, err = service.ValidateZenLoginSession(control)
 			require.NoError(t, err, "a replay with another registered URI cannot revoke the issued session")
-			_, err = service.ExchangeXCodeAuthorizationCode(input, "", "")
-			assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
-			_, _, err = service.ValidateXCodeLoginSession(control)
+			_, err = service.ExchangeZenAuthorizationCode(input, "", "")
+			assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
+			_, _, err = service.ValidateZenLoginSession(control)
 			assert.ErrorIs(t, err, service.ErrLoginSessionRevoked)
 			key, err := model.GetTokenById(bundle.Token.Id)
 			require.NoError(t, err)
@@ -1288,8 +1288,8 @@ func TestXCodeDesktopRegisteredRedirectsRemainCodeBound(t *testing.T) {
 	}
 }
 
-func TestXCodeDesktopRejectsUnregisteredRedirects(t *testing.T) {
-	setupXCodeAuthTest(t)
+func TestZenDesktopRejectsUnregisteredRedirects(t *testing.T) {
+	setupZenAuthTest(t)
 	for _, scheme := range []string{"aiscoo", "aiscoo-dev", "aiscoo-preview", "zcode"} {
 		for _, redirect := range []string{
 			strings.ToUpper(scheme) + "://oauth/callback", scheme + "://OAUTH/callback",
@@ -1301,33 +1301,33 @@ func TestXCodeDesktopRejectsUnregisteredRedirects(t *testing.T) {
 			" " + scheme + "://oauth/callback", scheme + "://oauth/callback\n",
 		} {
 			t.Run(redirect, func(t *testing.T) {
-				request := xcodeAuthorizeInput()
+				request := zenAuthorizeInput()
 				request.RedirectURI = redirect
-				flow, err := service.StartXCodeAuthorization(request)
-				assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
+				flow, err := service.StartZenAuthorization(request)
+				assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
 				assert.Empty(t, flow)
-				bundle, err := service.ExchangeXCodeAuthorizationCode(service.XCodeTokenRequest{
+				bundle, err := service.ExchangeZenAuthorizationCode(service.ZenTokenRequest{
 					GrantType: "authorization_code", ClientID: request.ClientID, RedirectURI: redirect,
 					Code: strings.Repeat("a", 43), CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 				}, "", "")
-				assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+				assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 				assert.Nil(t, bundle)
 			})
 		}
-		request := xcodeAuthorizeInput()
+		request := zenAuthorizeInput()
 		request.RedirectURI = scheme + "://oauth/callback"
 		for _, clientID := range []string{"xwork-cli", "web", "aiscoo-desktop"} {
 			request.ClientID = clientID
-			flow, err := service.StartXCodeAuthorization(request)
-			assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid, clientID)
+			flow, err := service.StartZenAuthorization(request)
+			assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid, clientID)
 			assert.Empty(t, flow)
 		}
 	}
 	for _, redirect := range []string{"http://127.0.0.1:49152/oauth/callback", "http://localhost:49152/oauth/callback", "https://oauth/callback", "aiscoo-other://oauth/callback"} {
-		request := xcodeAuthorizeInput()
+		request := zenAuthorizeInput()
 		request.RedirectURI = redirect
-		flow, err := service.StartXCodeAuthorization(request)
-		assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid, redirect)
+		flow, err := service.StartZenAuthorization(request)
+		assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid, redirect)
 		assert.Empty(t, flow)
 	}
 	var count int64
@@ -1335,30 +1335,30 @@ func TestXCodeDesktopRejectsUnregisteredRedirects(t *testing.T) {
 	assert.Zero(t, count, "rejected requests must not create flows")
 }
 
-func TestXCodeDesktopRegisteredRedirectsExpire(t *testing.T) {
+func TestZenDesktopRegisteredRedirectsExpire(t *testing.T) {
 	for _, redirect := range []string{"aiscoo://oauth/callback", "aiscoo-dev://oauth/callback", "aiscoo-preview://oauth/callback", "zcode://oauth/callback"} {
-		for _, purpose := range []string{model.AuthFlowPurposeXCodeRequest, model.AuthFlowPurposeXCodeCode} {
+		for _, purpose := range []string{model.AuthFlowPurposeZenRequest, model.AuthFlowPurposeZenCode} {
 			t.Run(redirect+"/"+purpose, func(t *testing.T) {
-				_, identity := setupXCodeAuthTest(t)
-				if purpose == model.AuthFlowPurposeXCodeRequest {
-					request := xcodeAuthorizeInput()
+				_, identity := setupZenAuthTest(t)
+				if purpose == model.AuthFlowPurposeZenRequest {
+					request := zenAuthorizeInput()
 					request.RedirectURI = redirect
-					flow, err := service.StartXCodeAuthorization(request)
+					flow, err := service.StartZenAuthorization(request)
 					require.NoError(t, err)
 					require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("purpose = ?", purpose).Update("expires_at", time.Now().Add(-time.Minute)).Error)
-					_, err = service.GetXCodeAuthorizationRequest(flow)
-					assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
-					callback, err := service.CompleteXCodeAuthorization(identity, flow)
-					assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
+					_, err = service.GetZenAuthorizationRequest(flow)
+					assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
+					callback, err := service.CompleteZenAuthorization(identity, flow)
+					assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
 					assert.Empty(t, callback)
 				} else {
-					input := xcodeCodeForIdentity(t, identity, redirect)
+					input := zenCodeForIdentity(t, identity, redirect)
 					var code model.AuthFlow
 					require.NoError(t, model.DB.Where("purpose = ?", purpose).First(&code).Error)
 					assert.InDelta(t, time.Now().Add(time.Minute).Unix(), code.ExpiresAt.Unix(), 2)
 					require.NoError(t, model.DB.Model(&code).Update("expires_at", time.Now().Add(-time.Minute)).Error)
-					bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
-					assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+					bundle, err := service.ExchangeZenAuthorizationCode(input, "", "")
+					assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 					assert.Nil(t, bundle)
 				}
 				var keys int64
@@ -1369,26 +1369,26 @@ func TestXCodeDesktopRegisteredRedirectsExpire(t *testing.T) {
 	}
 }
 
-func TestXCodeDesktopRegisteredRedirectsPreserveRefreshAndLogout(t *testing.T) {
+func TestZenDesktopRegisteredRedirectsPreserveRefreshAndLogout(t *testing.T) {
 	for _, redirect := range []string{"aiscoo://oauth/callback", "aiscoo-dev://oauth/callback", "aiscoo-preview://oauth/callback", "zcode://oauth/callback"} {
 		t.Run(redirect, func(t *testing.T) {
-			_, identity := setupXCodeAuthTest(t)
-			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, identity, redirect), "", "")
+			_, identity := setupZenAuthTest(t)
+			bundle, err := service.ExchangeZenAuthorizationCode(zenCodeForIdentity(t, identity, redirect), "", "")
 			require.NoError(t, err)
-			_, err = service.RefreshXCodeSession(service.XCodeRefreshRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
+			_, err = service.RefreshZenSession(service.ZenRefreshRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
 			assert.ErrorIs(t, err, service.ErrAuthCredentialScopeDenied)
-			assert.ErrorIs(t, service.LogoutXCodeSession(nil, service.XCodeLogoutRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}), service.ErrAuthCredentialScopeDenied)
-			refreshed, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
+			assert.ErrorIs(t, service.LogoutZenSession(nil, service.ZenLogoutRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}), service.ErrAuthCredentialScopeDenied)
+			refreshed, err := service.RefreshZenSession(service.ZenRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
 			require.NoError(t, err)
 			assert.Equal(t, bundle.Session.SID, refreshed.Session.SID)
 			assert.Equal(t, "xcode-desktop", refreshed.Session.ClientID)
 			assert.Equal(t, bundle.Token.Id, refreshed.Token.Id)
 			assert.Equal(t, bundle.Token.Key, refreshed.Token.Key)
 			assert.NotEqual(t, bundle.RefreshToken, refreshed.RefreshToken)
-			require.NoError(t, service.LogoutXCodeSession(nil, service.XCodeLogoutRequest{ClientID: "xcode-desktop", SessionID: refreshed.Session.SID, RefreshToken: refreshed.RefreshToken}))
-			control, err := service.ParseXCodeAccessToken(refreshed.AccessToken)
+			require.NoError(t, service.LogoutZenSession(nil, service.ZenLogoutRequest{ClientID: "xcode-desktop", SessionID: refreshed.Session.SID, RefreshToken: refreshed.RefreshToken}))
+			control, err := service.ParseZenAccessToken(refreshed.AccessToken)
 			require.NoError(t, err)
-			_, _, err = service.ValidateXCodeLoginSession(control)
+			_, _, err = service.ValidateZenLoginSession(control)
 			assert.ErrorIs(t, err, service.ErrLoginSessionRevoked)
 			_, _, err = service.ValidateLoginSession(identity)
 			require.NoError(t, err, "desktop logout must preserve the browser's session")
@@ -1396,47 +1396,47 @@ func TestXCodeDesktopRegisteredRedirectsPreserveRefreshAndLogout(t *testing.T) {
 	}
 }
 
-func TestXCodeCLIAuthorizationIsolatedSession(t *testing.T) {
-	_, identity := setupXCodeAuthTest(t)
-	input := xcodeAuthorizeInput()
+func TestZenCLIAuthorizationIsolatedSession(t *testing.T) {
+	_, identity := setupZenAuthTest(t)
+	input := zenAuthorizeInput()
 	input.ClientID = "xwork-cli"
 	input.RedirectURI = "http://127.0.0.1:49152/oauth/callback"
-	flow, err := service.StartXCodeAuthorization(input)
+	flow, err := service.StartZenAuthorization(input)
 	require.NoError(t, err)
-	callback, err := service.CompleteXCodeAuthorization(identity, flow)
+	callback, err := service.CompleteZenAuthorization(identity, flow)
 	require.NoError(t, err)
 	u, err := url.Parse(callback)
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:49152", u.Host)
 	assert.Equal(t, "/oauth/callback", u.Path)
 	assert.Equal(t, input.State, u.Query().Get("state"))
-	tokenInput := service.XCodeTokenRequest{GrantType: "authorization_code", ClientID: input.ClientID, RedirectURI: input.RedirectURI, Code: u.Query().Get("code"), CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
+	tokenInput := service.ZenTokenRequest{GrantType: "authorization_code", ClientID: input.ClientID, RedirectURI: input.RedirectURI, Code: u.Query().Get("code"), CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
 	// 与 xcodeAuthorizeInput 的独立固定 verifier 一致，错误 URI 不能消费 code。
 	wrong := tokenInput
 	wrong.RedirectURI = "http://127.0.0.1:49153/oauth/callback"
-	_, err = service.ExchangeXCodeAuthorizationCode(wrong, "", "")
-	assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
-	bundle, err := service.ExchangeXCodeAuthorizationCode(tokenInput, "", "cli-test")
+	_, err = service.ExchangeZenAuthorizationCode(wrong, "", "")
+	assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
+	bundle, err := service.ExchangeZenAuthorizationCode(tokenInput, "", "cli-test")
 	require.NoError(t, err)
 	assert.Equal(t, "xwork-cli", bundle.Session.ClientID)
-	_, err = service.RefreshXCodeSession(service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
+	_, err = service.RefreshZenSession(service.ZenRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
 	assert.Error(t, err)
-	refreshed, err := service.RefreshXCodeSession(service.XCodeRefreshRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
+	refreshed, err := service.RefreshZenSession(service.ZenRefreshRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}, "", "")
 	require.NoError(t, err)
-	assert.Error(t, service.LogoutXCodeSession(nil, service.XCodeLogoutRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: refreshed.RefreshToken}))
-	require.NoError(t, service.LogoutXCodeSession(nil, service.XCodeLogoutRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: refreshed.RefreshToken}))
+	assert.Error(t, service.LogoutZenSession(nil, service.ZenLogoutRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: refreshed.RefreshToken}))
+	require.NoError(t, service.LogoutZenSession(nil, service.ZenLogoutRequest{ClientID: "xwork-cli", SessionID: bundle.Session.SID, RefreshToken: refreshed.RefreshToken}))
 	_, _, err = service.ValidateLoginSession(identity)
 	require.NoError(t, err)
 }
 
-func TestXCodeCodeVerifierFailureDoesNotConsumeCode(t *testing.T) {
-	_, identity := setupXCodeAuthTest(t)
-	input := xcodeCodeForIdentity(t, identity)
-	for _, verifier := range []string{"", strings.Repeat("a", 42), strings.Repeat("a", 129), strings.Repeat("!", 43), strings.Repeat("a", 43), xcodeAuthorizeInput().CodeChallenge} {
+func TestZenCodeVerifierFailureDoesNotConsumeCode(t *testing.T) {
+	_, identity := setupZenAuthTest(t)
+	input := zenCodeForIdentity(t, identity)
+	for _, verifier := range []string{"", strings.Repeat("a", 42), strings.Repeat("a", 129), strings.Repeat("!", 43), strings.Repeat("a", 43), zenAuthorizeInput().CodeChallenge} {
 		invalid := input
 		invalid.CodeVerifier = verifier
-		_, err := service.ExchangeXCodeAuthorizationCode(invalid, "", "")
-		assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+		_, err := service.ExchangeZenAuthorizationCode(invalid, "", "")
+		assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 	}
 	for _, field := range []string{"client", "redirect", "grant"} {
 		invalid := input
@@ -1448,32 +1448,32 @@ func TestXCodeCodeVerifierFailureDoesNotConsumeCode(t *testing.T) {
 		case "grant":
 			invalid.GrantType = "refresh_token"
 		}
-		_, err := service.ExchangeXCodeAuthorizationCode(invalid, "", "")
-		assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+		_, err := service.ExchangeZenAuthorizationCode(invalid, "", "")
+		assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 	}
-	bundle, err := service.ExchangeXCodeAuthorizationCode(input, "127.0.0.1", "xcode-test")
+	bundle, err := service.ExchangeZenAuthorizationCode(input, "127.0.0.1", "xcode-test")
 	require.NoError(t, err)
 	assert.NotEqual(t, identity.SessionID, bundle.Session.SID)
-	assert.Equal(t, model.ClientPurposeXCode, bundle.Session.ClientPurpose)
+	assert.Equal(t, model.ClientPurposeZen, bundle.Session.ClientPurpose)
 	assert.Equal(t, bundle.Session.SID, bundle.Token.ClientSessionSID)
 	assert.True(t, bundle.Token.UnlimitedQuota)
 	assert.Zero(t, bundle.Token.RemainQuota)
 	assert.Empty(t, bundle.Token.Group)
 	assert.LessOrEqual(t, bundle.Token.ExpiredTime, bundle.Session.ExpiresAt)
-	control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+	control, err := service.ParseZenAccessToken(bundle.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, bundle.Session.SID, control.SessionID)
 	_, err = service.ParseAccessToken(bundle.AccessToken)
 	assert.Error(t, err)
 	wrongReplay := input
 	wrongReplay.CodeVerifier = strings.Repeat("a", 43)
-	_, err = service.ExchangeXCodeAuthorizationCode(wrongReplay, "", "")
-	assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
-	_, _, err = service.ValidateXCodeLoginSession(control)
+	_, err = service.ExchangeZenAuthorizationCode(wrongReplay, "", "")
+	assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
+	_, _, err = service.ValidateZenLoginSession(control)
 	require.NoError(t, err, "invalid verifier replay cannot revoke a live client")
-	_, err = service.ExchangeXCodeAuthorizationCode(input, "", "")
-	assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
-	_, _, err = service.ValidateXCodeLoginSession(control)
+	_, err = service.ExchangeZenAuthorizationCode(input, "", "")
+	assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
+	_, _, err = service.ValidateZenLoginSession(control)
 	assert.Error(t, err, "valid replay revokes only the code's issued client")
 	key, err := model.GetTokenById(bundle.Token.Id)
 	require.NoError(t, err)
@@ -1483,14 +1483,14 @@ func TestXCodeCodeVerifierFailureDoesNotConsumeCode(t *testing.T) {
 	assert.Equal(t, model.UserSessionStatusActive, source.Status)
 }
 
-func TestXCodeConcurrentReplayRevokesIssuanceAfterSourceRevocation(t *testing.T) {
-	user, identity := setupXCodeAuthTest(t)
-	input := xcodeCodeForIdentity(t, identity)
+func TestZenConcurrentReplayRevokesIssuanceAfterSourceRevocation(t *testing.T) {
+	user, identity := setupZenAuthTest(t)
+	input := zenCodeForIdentity(t, identity)
 	preflight, resume := make(chan struct{}), make(chan struct{})
 	var paused atomic.Bool
 	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register("test:pause_code_preflight", func(tx *gorm.DB) {
 		flow, ok := tx.Statement.Dest.(*model.AuthFlow)
-		if ok && flow.Purpose == model.AuthFlowPurposeXCodeCode && flow.ConsumedAt == nil && paused.CompareAndSwap(false, true) {
+		if ok && flow.Purpose == model.AuthFlowPurposeZenCode && flow.ConsumedAt == nil && paused.CompareAndSwap(false, true) {
 			close(preflight)
 			<-resume
 		}
@@ -1498,7 +1498,7 @@ func TestXCodeConcurrentReplayRevokesIssuanceAfterSourceRevocation(t *testing.T)
 	t.Cleanup(func() { _ = model.DB.Callback().Query().Remove("test:pause_code_preflight") })
 	replayed := make(chan error, 1)
 	go func() {
-		_, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
+		_, err := service.ExchangeZenAuthorizationCode(input, "", "")
 		replayed <- err
 	}()
 	select {
@@ -1506,26 +1506,26 @@ func TestXCodeConcurrentReplayRevokesIssuanceAfterSourceRevocation(t *testing.T)
 	case <-time.After(10 * time.Second):
 		t.Fatal("code preflight did not reach the race barrier")
 	}
-	bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
+	bundle, err := service.ExchangeZenAuthorizationCode(input, "", "")
 	require.NoError(t, err)
 	_, err = model.RevokeUserSession(user.Id, identity.SessionID, "source_revoke")
 	require.NoError(t, err)
 	close(resume)
-	assert.ErrorIs(t, <-replayed, service.ErrXCodeAuthCodeInvalid)
-	control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+	assert.ErrorIs(t, <-replayed, service.ErrZenAuthCodeInvalid)
+	control, err := service.ParseZenAccessToken(bundle.AccessToken)
 	require.NoError(t, err)
-	_, _, err = service.ValidateXCodeLoginSession(control)
+	_, _, err = service.ValidateZenLoginSession(control)
 	assert.ErrorIs(t, err, service.ErrLoginSessionRevoked, "valid concurrent replay must revoke its issued session even when its source is now invalid")
 	key, err := model.GetTokenById(bundle.Token.Id)
 	require.NoError(t, err)
 	assert.Equal(t, common.TokenStatusDisabled, key.Status)
 }
 
-func TestXCodeCodeSourceAuthorityAndExpiry(t *testing.T) {
+func TestZenCodeSourceAuthorityAndExpiry(t *testing.T) {
 	for _, change := range []string{"code expiry", "source revoked", "auth version", "source expiry", "source purpose", "source refresh"} {
 		t.Run(change, func(t *testing.T) {
-			user, identity := setupXCodeAuthTest(t)
-			input := xcodeCodeForIdentity(t, identity)
+			user, identity := setupZenAuthTest(t)
+			input := zenCodeForIdentity(t, identity)
 			switch change {
 			case "code expiry":
 				require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("user_id = ?", user.Id).Update("expires_at", time.Now().Add(-time.Minute)).Error)
@@ -1538,17 +1538,17 @@ func TestXCodeCodeSourceAuthorityAndExpiry(t *testing.T) {
 			case "source expiry":
 				require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", identity.SessionID).Update("expires_at", time.Now().Add(-time.Minute).Unix()).Error)
 			case "source purpose":
-				require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", identity.SessionID).Update("client_purpose", model.ClientPurposeXCode).Error)
+				require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", identity.SessionID).Update("client_purpose", model.ClientPurposeZen).Error)
 			case "source refresh":
 				require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", identity.SessionID).Update("version", identity.SessionVersion+1).Error)
 			}
-			bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
+			bundle, err := service.ExchangeZenAuthorizationCode(input, "", "")
 			if change == "source refresh" {
 				require.NoError(t, err)
 				assert.NotEmpty(t, bundle.AccessToken)
 				return
 			}
-			assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+			assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 			var count int64
 			require.NoError(t, model.DB.Model(&model.Token{}).Count(&count).Error)
 			assert.Zero(t, count)
@@ -1556,11 +1556,11 @@ func TestXCodeCodeSourceAuthorityAndExpiry(t *testing.T) {
 	}
 }
 
-func TestXCodeExchangeRollsBackAllIssuanceFacts(t *testing.T) {
+func TestZenExchangeRollsBackAllIssuanceFacts(t *testing.T) {
 	for _, failure := range []string{"key limit", "session limit", "issuance limit", "key insert"} {
 		t.Run(failure, func(t *testing.T) {
-			_, identity := setupXCodeAuthTest(t)
-			input := xcodeCodeForIdentity(t, identity)
+			_, identity := setupZenAuthTest(t)
+			input := zenCodeForIdentity(t, identity)
 			active, issuance, tokens := common.UserSessionActiveLimit, common.UserSessionIssuanceLimit, operation_setting.GetMaxUserTokens()
 			callbackRegistered := false
 			t.Cleanup(func() {
@@ -1587,7 +1587,7 @@ func TestXCodeExchangeRollsBackAllIssuanceFacts(t *testing.T) {
 					}
 				})
 			}
-			bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
+			bundle, err := service.ExchangeZenAuthorizationCode(input, "", "")
 			require.Error(t, err)
 			assert.Nil(t, bundle)
 			var sessions, keys int64
@@ -1605,12 +1605,12 @@ func TestXCodeExchangeRollsBackAllIssuanceFacts(t *testing.T) {
 				require.NoError(t, model.DB.Callback().Create().Remove("xcode_test_key_failure"))
 				callbackRegistered = false
 			}
-			_, err = service.ExchangeXCodeAuthorizationCode(input, "", "")
+			_, err = service.ExchangeZenAuthorizationCode(input, "", "")
 			require.NoError(t, err, "rolled-back code remains usable")
 		})
 	}
 }
-func enableXCodeAuthTestRedis(t *testing.T, userID int) {
+func enableZenAuthTestRedis(t *testing.T, userID int) {
 	t.Helper()
 	server := miniredis.RunT(t)
 	previous := common.RDB
@@ -1623,19 +1623,19 @@ func enableXCodeAuthTestRedis(t *testing.T, userID int) {
 	require.NoError(t, model.PublishUserAuthCache(userID))
 }
 
-func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
+func TestZenExchangeSerializesLastIssuanceSlot(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		for _, cached := range []bool{false, true} {
 			for _, limit := range []string{"session", "issuance", "key"} {
 				t.Run(fmt.Sprintf("native=%t/redis=%t/%s", native, cached, limit), func(t *testing.T) {
-					user, identity := setupXCodeAuthTest(t)
+					user, identity := setupZenAuthTest(t)
 					if cached {
-						enableXCodeAuthTestRedis(t, user.Id)
+						enableZenAuthTestRedis(t, user.Id)
 					}
-					losingCode := xcodeCodeForIdentity(t, identity)
-					firstCode := service.XCodeTokenRequest{}
+					losingCode := zenCodeForIdentity(t, identity)
+					firstCode := service.ZenTokenRequest{}
 					if !native {
-						firstCode = xcodeCodeForIdentity(t, identity)
+						firstCode = zenCodeForIdentity(t, identity)
 					}
 					active, issuance, keys := common.UserSessionActiveLimit, common.UserSessionIssuanceLimit, operation_setting.GetMaxUserTokens()
 					t.Cleanup(func() {
@@ -1714,7 +1714,7 @@ func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
 					firstResult, secondResult := make(chan error, 1), make(chan error, 1)
 					go func() {
 						if !native {
-							_, err := service.ExchangeXCodeAuthorizationCode(firstCode, "", "")
+							_, err := service.ExchangeZenAuthorizationCode(firstCode, "", "")
 							firstResult <- err
 						} else if limit == "key" {
 							token := &model.Token{UserId: user.Id, Key: strings.Repeat("k", 48), Status: common.TokenStatusEnabled, Name: "native", ExpiredTime: -1, UnlimitedQuota: true}
@@ -1735,7 +1735,7 @@ func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
 								close(attempting)
 							}
 						}
-						bundle, err := service.ExchangeXCodeAuthorizationCode(losingCode, "", "")
+						bundle, err := service.ExchangeZenAuthorizationCode(losingCode, "", "")
 						if bundle != nil {
 							secondResult <- errors.New("last-slot loser returned credentials")
 							return
@@ -1762,12 +1762,12 @@ func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
 					}
 					assert.Equal(t, wantSessions, sessions)
 					assert.Equal(t, wantTokens, tokens)
-					flow, err := model.GetAuthFlow(losingCode.Code, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeXCodeCode})
+					flow, err := model.GetAuthFlow(losingCode.Code, model.AuthFlowMatch{Purpose: model.AuthFlowPurposeZenCode})
 					require.NoError(t, err, "the losing code remains unconsumed")
 					assert.NotContains(t, flow.Payload, "issued_session_sid")
 					common.UserSessionActiveLimit, common.UserSessionIssuanceLimit = 100, 100
 					operation_setting.GetTokenSetting().MaxUserTokens = 100
-					_, err = service.ExchangeXCodeAuthorizationCode(losingCode, "", "")
+					_, err = service.ExchangeZenAuthorizationCode(losingCode, "", "")
 					require.NoError(t, err, "the same code is retryable when capacity becomes available")
 				})
 			}
@@ -1775,13 +1775,13 @@ func TestXCodeExchangeSerializesLastIssuanceSlot(t *testing.T) {
 	}
 }
 
-func TestXCodeExchangeCannotInvertHardDeleteOwnerLock(t *testing.T) {
+func TestZenExchangeCannotInvertHardDeleteOwnerLock(t *testing.T) {
 	for _, cached := range []bool{false, true} {
 		t.Run(fmt.Sprintf("redis=%t", cached), func(t *testing.T) {
-			user, identity := setupXCodeAuthTest(t)
-			input := xcodeCodeForIdentity(t, identity)
+			user, identity := setupZenAuthTest(t)
+			input := zenCodeForIdentity(t, identity)
 			if cached {
-				enableXCodeAuthTestRedis(t, user.Id)
+				enableZenAuthTestRedis(t, user.Id)
 			}
 			require.NoError(t, model.DB.AutoMigrate(&model.ExternalIdentityClaim{}))
 			connection, err := model.DB.DB()
@@ -1838,7 +1838,7 @@ func TestXCodeExchangeCannotInvertHardDeleteOwnerLock(t *testing.T) {
 				if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 					attemptingOnce.Do(func() { close(attempting) })
 				}
-				bundle, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
+				bundle, err := service.ExchangeZenAuthorizationCode(input, "", "")
 				if bundle != nil {
 					exchanged <- errors.New("deleted source issued credentials")
 					return
@@ -1861,7 +1861,7 @@ func TestXCodeExchangeCannotInvertHardDeleteOwnerLock(t *testing.T) {
 				exchangeErr = <-exchanged
 			}
 			assert.NoError(t, deleteErr, "deletion must commit without a flow/user lock cycle")
-			assert.ErrorIs(t, exchangeErr, service.ErrXCodeAuthCodeInvalid)
+			assert.ErrorIs(t, exchangeErr, service.ErrZenAuthCodeInvalid)
 			for _, table := range []any{&model.User{}, &model.AuthFlow{}, &model.UserSession{}, &model.Token{}} {
 				var count int64
 				query := model.DB.Unscoped().Model(table)
@@ -1877,11 +1877,11 @@ func TestXCodeExchangeCannotInvertHardDeleteOwnerLock(t *testing.T) {
 	}
 }
 
-func TestXCodeAuthorizationRequiresLiveDashboardSource(t *testing.T) {
+func TestZenAuthorizationRequiresLiveDashboardSource(t *testing.T) {
 	for _, source := range []string{"anonymous", "PAT", "xcode", "unknown purpose", "revoked", "stale version", "expired request", "other purpose"} {
 		t.Run(source, func(t *testing.T) {
-			user, identity := setupXCodeAuthTest(t)
-			flow, err := service.StartXCodeAuthorization(xcodeAuthorizeInput())
+			user, identity := setupZenAuthTest(t)
+			flow, err := service.StartZenAuthorization(zenAuthorizeInput())
 			require.NoError(t, err)
 			switch source {
 			case "anonymous":
@@ -1889,7 +1889,7 @@ func TestXCodeAuthorizationRequiresLiveDashboardSource(t *testing.T) {
 			case "PAT":
 				identity.SessionID = "pat:1"
 			case "xcode", "unknown purpose":
-				purpose := model.ClientPurposeXCode
+				purpose := model.ClientPurposeZen
 				if source == "unknown purpose" {
 					purpose = "other"
 				}
@@ -1901,12 +1901,12 @@ func TestXCodeAuthorizationRequiresLiveDashboardSource(t *testing.T) {
 				identity.SessionVersion++
 			case "expired request":
 				require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("user_id = 0").Update("expires_at", time.Now().Add(-time.Minute)).Error)
-				_, err = service.GetXCodeAuthorizationRequest(flow)
-				assert.ErrorIs(t, err, service.ErrXCodeAuthRequestInvalid)
+				_, err = service.GetZenAuthorizationRequest(flow)
+				assert.ErrorIs(t, err, service.ErrZenAuthRequestInvalid)
 			case "other purpose":
 				require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("user_id = 0").Update("purpose", model.AuthFlowPurposeOAuth).Error)
 			}
-			redirect, err := service.CompleteXCodeAuthorization(identity, flow)
+			redirect, err := service.CompleteZenAuthorization(identity, flow)
 			assert.Error(t, err)
 			assert.Empty(t, redirect)
 			var count int64
@@ -1916,13 +1916,13 @@ func TestXCodeAuthorizationRequiresLiveDashboardSource(t *testing.T) {
 	}
 }
 
-func TestXCodeRefreshPreservesKeyAndRejectsRecreation(t *testing.T) {
+func TestZenRefreshPreservesKeyAndRejectsRecreation(t *testing.T) {
 	for _, change := range []string{"rotate", "deleted key", "disabled key", "dashboard refresh", "wrong SID", "wrong client"} {
 		t.Run(change, func(t *testing.T) {
-			_, identity := setupXCodeAuthTest(t)
-			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, identity), "", "")
+			_, identity := setupZenAuthTest(t)
+			bundle, err := service.ExchangeZenAuthorizationCode(zenCodeForIdentity(t, identity), "", "")
 			require.NoError(t, err)
-			input := service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
+			input := service.ZenRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
 			switch change {
 			case "deleted key":
 				require.NoError(t, bundle.Token.Delete())
@@ -1938,7 +1938,7 @@ func TestXCodeRefreshPreservesKeyAndRejectsRecreation(t *testing.T) {
 			case "wrong client":
 				input.ClientID = "other"
 			}
-			refreshed, err := service.RefreshXCodeSession(input, "", "")
+			refreshed, err := service.RefreshZenSession(input, "", "")
 			if change == "rotate" {
 				require.NoError(t, err)
 				assert.Equal(t, bundle.Token.Id, refreshed.Token.Id)
@@ -1956,17 +1956,17 @@ func TestXCodeRefreshPreservesKeyAndRejectsRecreation(t *testing.T) {
 	}
 }
 
-func TestXCodeLogoutRequiresCredentialAndPreservesOtherSessions(t *testing.T) {
+func TestZenLogoutRequiresCredentialAndPreservesOtherSessions(t *testing.T) {
 	for _, credential := range []string{"control", "refresh", "bare SID", "wrong refresh", "wrong control SID", "dashboard", "PAT"} {
 		t.Run(credential, func(t *testing.T) {
-			_, dashboard := setupXCodeAuthTest(t)
-			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+			_, dashboard := setupZenAuthTest(t)
+			bundle, err := service.ExchangeZenAuthorizationCode(zenCodeForIdentity(t, dashboard), "", "")
 			require.NoError(t, err)
 			other, err := service.CreateLoginSession(dashboard.UserID, "password", "", "")
 			require.NoError(t, err)
-			control, err := service.ParseXCodeAccessToken(bundle.AccessToken)
+			control, err := service.ParseZenAccessToken(bundle.AccessToken)
 			require.NoError(t, err)
-			input := service.XCodeLogoutRequest{SessionID: bundle.Session.SID}
+			input := service.ZenLogoutRequest{SessionID: bundle.Session.SID}
 			var identity *service.AuthIdentity
 			switch credential {
 			case "control":
@@ -1985,7 +1985,7 @@ func TestXCodeLogoutRequiresCredentialAndPreservesOtherSessions(t *testing.T) {
 				pat.SessionID = "pat:1"
 				identity = &pat
 			}
-			err = service.LogoutXCodeSession(identity, input)
+			err = service.LogoutZenSession(identity, input)
 			if credential == "control" || credential == "refresh" {
 				require.NoError(t, err)
 			} else {
@@ -2011,11 +2011,11 @@ func TestXCodeLogoutRequiresCredentialAndPreservesOtherSessions(t *testing.T) {
 	}
 }
 
-func TestXCodeEntryConfigurationRejectsUntrustedOrigins(t *testing.T) {
+func TestZenEntryConfigurationRejectsUntrustedOrigins(t *testing.T) {
 	t.Setenv("XCODE_INTEGRATION_ENABLED", "")
-	assert.False(t, common.XCodeIntegrationEnabled())
+	assert.False(t, common.ZenIntegrationEnabled())
 	t.Setenv("XCODE_INTEGRATION_ENABLED", "true")
-	assert.True(t, common.XCodeIntegrationEnabled())
+	assert.True(t, common.ZenIntegrationEnabled())
 	for _, test := range []struct{ input, want string }{
 		{"https://gateway.example", "https://gateway.example"},
 		{" https://gateway.example/ ", "https://gateway.example"},
@@ -2030,7 +2030,7 @@ func TestXCodeEntryConfigurationRejectsUntrustedOrigins(t *testing.T) {
 	} {
 		t.Run(test.input, func(t *testing.T) {
 			t.Setenv("XCODE_PUBLIC_ORIGIN", test.input)
-			origin, err := common.GetXCodePublicOrigin()
+			origin, err := common.GetZenPublicOrigin()
 			if test.want == "" {
 				assert.Error(t, err)
 				assert.Empty(t, origin)
@@ -2042,11 +2042,11 @@ func TestXCodeEntryConfigurationRejectsUntrustedOrigins(t *testing.T) {
 	}
 }
 
-func TestXCodeCodeHonorsPrecommitAuthorityFences(t *testing.T) {
+func TestZenCodeHonorsPrecommitAuthorityFences(t *testing.T) {
 	for _, fence := range []string{"source SID", "user auth floor"} {
 		t.Run(fence, func(t *testing.T) {
-			user, identity := setupXCodeAuthTest(t)
-			input := xcodeCodeForIdentity(t, identity)
+			user, identity := setupZenAuthTest(t)
+			input := zenCodeForIdentity(t, identity)
 			server := miniredis.RunT(t)
 			previousClient := common.RDB
 			client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
@@ -2072,8 +2072,8 @@ func TestXCodeCodeHonorsPrecommitAuthorityFences(t *testing.T) {
 				require.NotEmpty(t, cacheKey)
 				server.HSet(cacheKey, "Status", model.UserSessionStatusRevoking)
 			}
-			_, err := service.ExchangeXCodeAuthorizationCode(input, "", "")
-			assert.ErrorIs(t, err, service.ErrXCodeAuthCodeInvalid)
+			_, err := service.ExchangeZenAuthorizationCode(input, "", "")
+			assert.ErrorIs(t, err, service.ErrZenAuthCodeInvalid)
 			var count int64
 			require.NoError(t, model.DB.Model(&model.Token{}).Count(&count).Error)
 			assert.Zero(t, count)
@@ -2081,30 +2081,30 @@ func TestXCodeCodeHonorsPrecommitAuthorityFences(t *testing.T) {
 	}
 }
 
-func TestXCodeRefreshRecoveryAndReplayRemainSIDBound(t *testing.T) {
-	_, dashboard := setupXCodeAuthTest(t)
-	bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, dashboard), "", "")
+func TestZenRefreshRecoveryAndReplayRemainSIDBound(t *testing.T) {
+	_, dashboard := setupZenAuthTest(t)
+	bundle, err := service.ExchangeZenAuthorizationCode(zenCodeForIdentity(t, dashboard), "", "")
 	require.NoError(t, err)
-	input := service.XCodeRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
-	rotated, err := service.RefreshXCodeSession(input, "", "")
+	input := service.ZenRefreshRequest{ClientID: "xcode-desktop", SessionID: bundle.Session.SID, RefreshToken: bundle.RefreshToken}
+	rotated, err := service.RefreshZenSession(input, "", "")
 	require.NoError(t, err)
-	recovered, err := service.RefreshXCodeSession(input, "", "")
+	recovered, err := service.RefreshZenSession(input, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, rotated.RefreshToken, recovered.RefreshToken)
 	assert.Equal(t, bundle.Token.Key, recovered.Token.Key)
 	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("previous_valid_until", time.Now().Add(-time.Minute).Unix()).Error)
-	_, err = service.RefreshXCodeSession(input, "", "")
+	_, err = service.RefreshZenSession(input, "", "")
 	assert.ErrorIs(t, err, service.ErrLoginSessionRevoked)
 	native, err := model.GetUserSessionBySID(dashboard.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusActive, native.Status)
 }
 
-func TestXCodeLogoutRefreshCleansDeletedOrDisabledManagedKey(t *testing.T) {
+func TestZenLogoutRefreshCleansDeletedOrDisabledManagedKey(t *testing.T) {
 	for _, action := range []string{"delete", "disable"} {
 		t.Run(action, func(t *testing.T) {
-			_, identity := setupXCodeAuthTest(t)
-			bundle, err := service.ExchangeXCodeAuthorizationCode(xcodeCodeForIdentity(t, identity), "", "")
+			_, identity := setupZenAuthTest(t)
+			bundle, err := service.ExchangeZenAuthorizationCode(zenCodeForIdentity(t, identity), "", "")
 			require.NoError(t, err)
 			if action == "delete" {
 				require.NoError(t, bundle.Token.Delete())
@@ -2112,7 +2112,7 @@ func TestXCodeLogoutRefreshCleansDeletedOrDisabledManagedKey(t *testing.T) {
 				bundle.Token.Status = common.TokenStatusDisabled
 				require.NoError(t, bundle.Token.SelectUpdate())
 			}
-			require.NoError(t, service.LogoutXCodeSession(nil, service.XCodeLogoutRequest{
+			require.NoError(t, service.LogoutZenSession(nil, service.ZenLogoutRequest{
 				SessionID: bundle.Session.SID, ClientID: "xcode-desktop", RefreshToken: bundle.RefreshToken,
 			}))
 			stored, err := model.GetUserSessionBySID(bundle.Session.SID)

@@ -37,7 +37,7 @@ type Token struct {
 	AllowUserQuotaQuery bool `json:"allow_user_quota_query"`
 }
 
-var ErrXCodeManagedTokenInvalid = errors.New("xcode managed token is invalid")
+var ErrZenManagedTokenInvalid = errors.New("xcode managed token is invalid")
 
 var ErrUserTokenLimit = errors.New("user token limit reached")
 
@@ -57,15 +57,15 @@ func CheckUserTokenIssuanceWithTx(tx *gorm.DB, userID int) error {
 	return nil
 }
 
-func validateXCodeManagedToken(token *Token, session *UserSession, now int64) error {
-	if token.ClientPurpose != ClientPurposeXCode || token.ClientSessionSID == "" || token.Key == "" ||
+func validateZenManagedToken(token *Token, session *UserSession, now int64) error {
+	if token.ClientPurpose != ClientPurposeZen || token.ClientSessionSID == "" || token.Key == "" ||
 		session.SID != token.ClientSessionSID || session.UserID != token.UserId ||
-		session.ClientPurpose != ClientPurposeXCode || session.Status != UserSessionStatusActive ||
+		session.ClientPurpose != ClientPurposeZen || session.Status != UserSessionStatusActive ||
 		session.RevokedAt != 0 || session.ExpiresAt <= now ||
 		token.Status != common.TokenStatusEnabled || token.ExpiredTime <= now || token.ExpiredTime > session.ExpiresAt ||
 		!token.UnlimitedQuota || token.Group != "" ||
 		(token.AutoGroups != "" && token.AutoGroups != "[]") || token.CrossGroupRetry || token.DeletedAt.Valid {
-		return ErrXCodeManagedTokenInvalid
+		return ErrZenManagedTokenInvalid
 	}
 	return nil
 }
@@ -74,21 +74,21 @@ func validateXCodeManagedToken(token *Token, session *UserSession, now int64) er
 func (token *Token) BeforeCreate(tx *gorm.DB) error {
 	if token.ClientPurpose == "" || token.ClientPurpose == ClientPurposeGeneral {
 		if token.ClientSessionSID != "" {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 		return nil
 	}
-	if token.ClientPurpose != ClientPurposeXCode || token.UserId <= 0 || token.ClientSessionSID == "" || token.RemainQuota != 0 {
-		return ErrXCodeManagedTokenInvalid
+	if token.ClientPurpose != ClientPurposeZen || token.UserId <= 0 || token.ClientSessionSID == "" || token.RemainQuota != 0 {
+		return ErrZenManagedTokenInvalid
 	}
 	var session UserSession
 	if err := lockForUpdate(tx).Model(&UserSession{}).Where("sid = ? AND user_id = ?", token.ClientSessionSID, token.UserId).First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 		return err
 	}
-	if err := validateXCodeManagedToken(token, &session, common.GetTimestamp()); err != nil {
+	if err := validateZenManagedToken(token, &session, common.GetTimestamp()); err != nil {
 		return err
 	}
 	var count int64
@@ -97,45 +97,45 @@ func (token *Token) BeforeCreate(tx *gorm.DB) error {
 	}
 	// Deleted credentials remain evidence of explicit revocation, not an invitation to recreate.
 	if count != 0 {
-		return ErrXCodeManagedTokenInvalid
+		return ErrZenManagedTokenInvalid
 	}
 	return nil
 }
 
-// GetXCodeSessionToken never resolves a key from Redis or recreates missing credentials.
-func GetXCodeSessionToken(userID int, sid string) (*Token, error) {
+// GetZenSessionToken never resolves a key from Redis or recreates missing credentials.
+func GetZenSessionToken(userID int, sid string) (*Token, error) {
 	if userID <= 0 || sid == "" {
-		return nil, ErrXCodeManagedTokenInvalid
+		return nil, ErrZenManagedTokenInvalid
 	}
 	// Honor the native pre-commit deny fence before consulting authoritative rows.
 	if common.RedisEnabled {
 		if _, err := getUserSessionCache(sid); errors.Is(err, ErrUserSessionInactive) {
-			return nil, ErrXCodeManagedTokenInvalid
+			return nil, ErrZenManagedTokenInvalid
 		}
 	}
 	session, err := GetUserSessionBySID(sid)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrXCodeManagedTokenInvalid
+			return nil, ErrZenManagedTokenInvalid
 		}
 		return nil, err
 	}
 	var tokens []Token
-	if err := DB.Unscoped().Where("user_id = ? AND client_purpose = ? AND client_session_sid = ?", userID, ClientPurposeXCode, sid).Limit(2).Find(&tokens).Error; err != nil {
+	if err := DB.Unscoped().Where("user_id = ? AND client_purpose = ? AND client_session_sid = ?", userID, ClientPurposeZen, sid).Limit(2).Find(&tokens).Error; err != nil {
 		return nil, err
 	}
 	if len(tokens) != 1 {
-		return nil, ErrXCodeManagedTokenInvalid
+		return nil, ErrZenManagedTokenInvalid
 	}
 	token := &tokens[0]
-	if err := validateXCodeManagedToken(token, session, common.GetTimestamp()); err != nil {
+	if err := validateZenManagedToken(token, session, common.GetTimestamp()); err != nil {
 		return nil, err
 	}
 	return token, nil
 }
 
 func revokeManagedTokenSession(token *Token) error {
-	if token.ClientPurpose != ClientPurposeXCode && token.ClientSessionSID == "" {
+	if token.ClientPurpose != ClientPurposeZen && token.ClientSessionSID == "" {
 		return nil
 	}
 	session, err := GetUserSessionBySID(token.ClientSessionSID)
@@ -145,7 +145,7 @@ func revokeManagedTokenSession(token *Token) error {
 		}
 		return err
 	}
-	if session.UserID != token.UserId || session.ClientPurpose != ClientPurposeXCode {
+	if session.UserID != token.UserId || session.ClientPurpose != ClientPurposeZen {
 		return nil
 	}
 	_, err = RevokeUserSession(token.UserId, token.ClientSessionSID, "managed_key_revoked")
@@ -153,18 +153,18 @@ func revokeManagedTokenSession(token *Token) error {
 }
 
 func validateManagedTokenStatusChange(stored *Token, status int) error {
-	if stored.ClientPurpose != ClientPurposeXCode {
+	if stored.ClientPurpose != ClientPurposeZen {
 		if stored.ClientSessionSID != "" || (stored.ClientPurpose != "" && stored.ClientPurpose != ClientPurposeGeneral) {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 		return nil
 	}
 	switch status {
 	case common.TokenStatusEnabled:
 		if stored.Status != common.TokenStatusEnabled {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
-		_, err := GetXCodeSessionToken(stored.UserId, stored.ClientSessionSID)
+		_, err := GetZenSessionToken(stored.UserId, stored.ClientSessionSID)
 		return err
 	case common.TokenStatusDisabled:
 		return revokeManagedTokenSession(stored)
@@ -173,7 +173,7 @@ func validateManagedTokenStatusChange(stored *Token, status int) error {
 			return revokeManagedTokenSession(stored)
 		}
 	}
-	return ErrXCodeManagedTokenInvalid
+	return ErrZenManagedTokenInvalid
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -462,7 +462,7 @@ func (token *Token) Update() (err error) {
 	if err != nil {
 		return err
 	}
-	if stored.ClientPurpose == ClientPurposeXCode {
+	if stored.ClientPurpose == ClientPurposeZen {
 		sameIPs := ((stored.AllowIps == nil || *stored.AllowIps == "") && (token.AllowIps == nil || *token.AllowIps == "")) ||
 			(stored.AllowIps != nil && token.AllowIps != nil && *stored.AllowIps == *token.AllowIps)
 		if token.UserId != stored.UserId || token.ClientPurpose != stored.ClientPurpose ||
@@ -471,7 +471,7 @@ func (token *Token) Update() (err error) {
 			token.ModelLimitsEnabled != stored.ModelLimitsEnabled || token.ModelLimits != stored.ModelLimits ||
 			!sameIPs || token.Group != stored.Group || token.CrossGroupRetry != stored.CrossGroupRetry ||
 			token.AutoGroups != stored.AutoGroups || token.AllowUserQuotaQuery != stored.AllowUserQuotaQuery {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 	}
 	if err := validateManagedTokenStatusChange(stored, token.Status); err != nil {
@@ -482,7 +482,7 @@ func (token *Token) Update() (err error) {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
 	}
 	query := DB.Model(stored)
-	if stored.ClientPurpose == ClientPurposeXCode {
+	if stored.ClientPurpose == ClientPurposeZen {
 		query = query.Where("status = ?", stored.Status).Select("name", "status")
 	} else {
 		query = query.Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
@@ -493,14 +493,14 @@ func (token *Token) Update() (err error) {
 	if result.Error != nil {
 		return result.Error
 	}
-	if stored.ClientPurpose == ClientPurposeXCode && result.RowsAffected == 0 {
+	if stored.ClientPurpose == ClientPurposeZen && result.RowsAffected == 0 {
 		current, err := GetTokenById(stored.Id)
 		if err != nil {
 			return err
 		}
 		// MySQL can report zero for a matched update whose values did not change.
 		if current.Status != token.Status || current.Name != token.Name {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 	}
 	return nil
@@ -518,20 +518,20 @@ func (token *Token) SelectUpdate() (err error) {
 		common.SysLog(common.LogText("failed to invalidate token cache before status update: %s", cacheErr.Error()))
 	}
 	query := DB.Model(stored)
-	if stored.ClientPurpose == ClientPurposeXCode {
+	if stored.ClientPurpose == ClientPurposeZen {
 		query = query.Where("status = ?", stored.Status)
 	}
 	result := query.Select("accessed_time", "status").Updates(token)
 	if result.Error != nil {
 		return result.Error
 	}
-	if stored.ClientPurpose == ClientPurposeXCode && result.RowsAffected == 0 {
+	if stored.ClientPurpose == ClientPurposeZen && result.RowsAffected == 0 {
 		current, err := GetTokenById(stored.Id)
 		if err != nil {
 			return err
 		}
 		if current.Status != token.Status || current.AccessedTime != token.AccessedTime {
-			return ErrXCodeManagedTokenInvalid
+			return ErrZenManagedTokenInvalid
 		}
 	}
 	return nil

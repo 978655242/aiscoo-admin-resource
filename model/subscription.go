@@ -179,8 +179,8 @@ type SubscriptionPlan struct {
 	// Downgrade user group on expiry (empty = revert to the group held before purchase)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
-	// XCODE: presentation metadata is persisted with the native plan, never as pricing or entitlement truth.
-	XCodeDisplay *XCodePlanDisplay `json:"xcode_display" gorm:"column:xcode_display;type:text"`
+	// ZEN: presentation metadata is persisted with the native plan, never as pricing or entitlement truth.
+	ZenDisplay *ZenPlanDisplay `json:"xcode_display" gorm:"column:xcode_display;type:text"`
 
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
@@ -290,7 +290,7 @@ type UserSubscription struct {
 
 func (s *UserSubscription) BeforeCreate(tx *gorm.DB) error {
 	now := common.GetTimestamp()
-	if s.UsageScope == SubscriptionUsageScopeXCode && s.QuotaResetGeneration == 0 {
+	if s.UsageScope == SubscriptionUsageScopeZen && s.QuotaResetGeneration == 0 {
 		s.QuotaResetGeneration = 1
 	}
 	s.CreatedAt = now
@@ -506,7 +506,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
-	if usageScope != SubscriptionUsageScopeGeneral && usageScope != SubscriptionUsageScopeXCode {
+	if usageScope != SubscriptionUsageScopeGeneral && usageScope != SubscriptionUsageScopeZen {
 		return nil, ErrSubscriptionFundingTargetInvalid
 	}
 	if plan.MaxPurchasePerUser > 0 {
@@ -522,16 +522,16 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	}
 	nowUnix, err := getDBTimestamp(tx)
 	if err != nil {
-		if usageScope == SubscriptionUsageScopeXCode {
+		if usageScope == SubscriptionUsageScopeZen {
 			return nil, err
 		}
 		nowUnix = common.GetTimestamp()
 	}
-	if usageScope == SubscriptionUsageScopeXCode {
+	if usageScope == SubscriptionUsageScopeZen {
 		if source != "admin" {
 			return nil, ErrSubscriptionFundingTargetInvalid
 		}
-		if err := ValidateXCodePlanForGrant(plan, nowUnix); err != nil {
+		if err := ValidateZenPlanForGrant(plan, nowUnix); err != nil {
 			return nil, err
 		}
 	}
@@ -546,7 +546,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if nextReset > 0 {
 		lastReset = now.Unix()
 	}
-	if usageScope == SubscriptionUsageScopeXCode && plan.QuotaResetPeriod != SubscriptionResetNever {
+	if usageScope == SubscriptionUsageScopeZen && plan.QuotaResetPeriod != SubscriptionResetNever {
 		lastReset = nowUnix
 	}
 	upgradeGroup := strings.TrimSpace(plan.UpgradeGroup)
@@ -568,7 +568,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if plan.AllowWalletOverflow != nil {
 		allowWalletOverflow = *plan.AllowWalletOverflow
 	}
-	if usageScope == SubscriptionUsageScopeXCode {
+	if usageScope == SubscriptionUsageScopeZen {
 		allowWalletOverflow = false
 	}
 	sub := &UserSubscription{
@@ -590,7 +590,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
 	}
-	if usageScope == SubscriptionUsageScopeXCode {
+	if usageScope == SubscriptionUsageScopeZen {
 		sub.QuotaResetPeriodSnapshot = plan.QuotaResetPeriod
 		sub.QuotaResetCustomSecondsSnapshot = plan.QuotaResetCustomSeconds
 		sub.QuotaResetGeneration = 1
@@ -910,7 +910,7 @@ func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	return buildSubscriptionSummaries(subs), nil
 }
 
-// HasActiveUserSubscription reports active native/general funding, never XCode funding.
+// HasActiveUserSubscription reports active native/general funding, never aiscoo zen funding.
 // This is a lightweight existence check to avoid heavy pre-consume transactions.
 func HasActiveUserSubscription(userId int) (bool, error) {
 	if userId <= 0 {
@@ -999,7 +999,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (*SubscriptionAdmin
 			return err
 		}
 		result = &SubscriptionAdminMutationResult{UserID: sub.UserId, SubscriptionID: sub.Id, UsageScope: sub.UsageScope}
-		if sub.UsageScope == SubscriptionUsageScopeXCode {
+		if sub.UsageScope == SubscriptionUsageScopeZen {
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, sub, nil, now); err != nil {
 				return err
 			}
@@ -1011,7 +1011,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (*SubscriptionAdmin
 		}
 		if authorization != nil {
 			if authorization.SubscriptionId == sub.Id {
-				if err := advanceXCodeAuthorizationRevisionTx(tx, authorization, now); err != nil {
+				if err := advanceZenAuthorizationRevisionTx(tx, authorization, now); err != nil {
 					return err
 				}
 			}
@@ -1030,7 +1030,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (*SubscriptionAdmin
 		return nil, err
 	}
 	if result.Message != nil {
-		if result.UsageScope == SubscriptionUsageScopeXCode {
+		if result.UsageScope == SubscriptionUsageScopeZen {
 			if err := RefreshUserGroupCache(result.UserID); err != nil {
 				return result, fmt.Errorf("subscription cancellation committed but group cache refresh failed: %w", err)
 			}
@@ -1060,8 +1060,8 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (*SubscriptionAdminMuta
 		if authorization != nil {
 			result.AuthorizationRevision = authorization.Revision
 		}
-		if sub.UsageScope == SubscriptionUsageScopeXCode {
-			if err := preventReferencedXCodeSubscriptionDeleteTx(tx, sub); err != nil {
+		if sub.UsageScope == SubscriptionUsageScopeZen {
+			if err := preventReferencedZenSubscriptionDeleteTx(tx, sub); err != nil {
 				return err
 			}
 		}
@@ -1078,7 +1078,7 @@ func AdminDeleteUserSubscription(userSubscriptionId int) (*SubscriptionAdminMuta
 		return nil, err
 	}
 	if result.Message != nil {
-		if result.UsageScope == SubscriptionUsageScopeXCode {
+		if result.UsageScope == SubscriptionUsageScopeZen {
 			if err := RefreshUserGroupCache(result.UserID); err != nil {
 				return result, fmt.Errorf("subscription deletion committed but group cache refresh failed: %w", err)
 			}
@@ -1093,7 +1093,7 @@ func subscriptionResetPlan(sub *UserSubscription, plan *SubscriptionPlan) (*Subs
 	if sub == nil {
 		return nil, ErrSubscriptionFundingTargetInvalid
 	}
-	if sub.UsageScope == SubscriptionUsageScopeXCode {
+	if sub.UsageScope == SubscriptionUsageScopeZen {
 		period := sub.QuotaResetPeriodSnapshot
 		if sub.QuotaResetGeneration <= 0 || period != NormalizeResetPeriod(period) ||
 			(period == SubscriptionResetCustom && (sub.QuotaResetCustomSecondsSnapshot <= 0 ||
@@ -1118,7 +1118,7 @@ func resetUserSubscriptionTx(tx *gorm.DB, sub *UserSubscription, plan *Subscript
 	if err != nil {
 		return err
 	}
-	if sub.UsageScope == SubscriptionUsageScopeXCode {
+	if sub.UsageScope == SubscriptionUsageScopeZen {
 		if sub.QuotaResetGeneration == math.MaxInt64 {
 			return ErrSubscriptionFundingTargetInvalid
 		}
@@ -1128,7 +1128,7 @@ func resetUserSubscriptionTx(tx *gorm.DB, sub *UserSubscription, plan *Subscript
 	if advanceResetTime {
 		nextReset := calcNextResetTime(time.Unix(now, 0), plan, sub.EndTime)
 		sub.NextResetTime = nextReset
-		if nextReset > 0 || (sub.UsageScope == SubscriptionUsageScopeXCode && plan.QuotaResetPeriod != SubscriptionResetNever) {
+		if nextReset > 0 || (sub.UsageScope == SubscriptionUsageScopeZen && plan.QuotaResetPeriod != SubscriptionResetNever) {
 			sub.LastResetTime = now
 		} else {
 			sub.LastResetTime = 0
@@ -1400,7 +1400,7 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 	if err != nil {
 		return err
 	}
-	if sub.UsageScope == SubscriptionUsageScopeXCode && (sub.Status != "active" || sub.EndTime <= now) {
+	if sub.UsageScope == SubscriptionUsageScopeZen && (sub.Status != "active" || sub.EndTime <= now) {
 		return nil
 	}
 	if sub.NextResetTime > 0 && sub.NextResetTime > now {
@@ -1429,7 +1429,7 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 		}
 		return nil
 	}
-	if sub.UsageScope == SubscriptionUsageScopeXCode {
+	if sub.UsageScope == SubscriptionUsageScopeZen {
 		if sub.QuotaResetGeneration == math.MaxInt64 {
 			return ErrSubscriptionFundingTargetInvalid
 		}
@@ -1448,7 +1448,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		if target.SubscriptionID != 0 || target.AuthorizationRevision != 0 {
 			return nil, ErrSubscriptionFundingTargetInvalid
 		}
-	case SubscriptionUsageScopeXCode:
+	case SubscriptionUsageScopeZen:
 		if target.SubscriptionID <= 0 || target.AuthorizationRevision <= 0 {
 			return nil, ErrSubscriptionFundingTargetInvalid
 		}
@@ -1461,8 +1461,8 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 	if strings.TrimSpace(requestId) == "" {
 		return nil, errors.New("requestId is empty")
 	}
-	if amount < 0 || (amount == 0 && target.Scope != SubscriptionUsageScopeXCode) {
-		return nil, errors.New("amount must be positive for native funding and nonnegative for XCode funding")
+	if amount < 0 || (amount == 0 && target.Scope != SubscriptionUsageScopeZen) {
+		return nil, errors.New("amount must be positive for native funding and nonnegative for aiscoo zen funding")
 	}
 
 	now := int64(0)
@@ -1475,16 +1475,16 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 	recordCreateFailed := false
 	admit := func(tx *gorm.DB) error {
 		recordCreateFailed = false
-		if target.Scope == SubscriptionUsageScopeXCode {
-			var authorization XCodeAuthorization
+		if target.Scope == SubscriptionUsageScopeZen {
+			var authorization ZenAuthorization
 			if err := lockForUpdate(tx).Where("user_id = ?", userId).First(&authorization).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return ErrXCodePlanUnassigned
+					return ErrZenPlanUnassigned
 				}
 				return err
 			}
 			if authorization.SubscriptionId != target.SubscriptionID || authorization.Revision != target.AuthorizationRevision {
-				return ErrXCodeAuthorizationConflict
+				return ErrZenAuthorizationConflict
 			}
 		}
 
@@ -1501,7 +1501,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 
 		var subs []UserSubscription
 		query = lockForUpdate(tx)
-		if target.Scope == SubscriptionUsageScopeXCode {
+		if target.Scope == SubscriptionUsageScopeZen {
 			query = query.Where("id = ?", target.SubscriptionID)
 		} else {
 			query = query.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
@@ -1512,12 +1512,12 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			return err
 		}
 		if len(subs) == 0 {
-			if target.Scope == SubscriptionUsageScopeXCode {
-				return ErrXCodePlanRevoked
+			if target.Scope == SubscriptionUsageScopeZen {
+				return ErrZenPlanRevoked
 			}
 			return ErrNoActiveSubscription
 		}
-		if target.Scope == SubscriptionUsageScopeXCode {
+		if target.Scope == SubscriptionUsageScopeZen {
 			var err error
 			now, err = getDBTimestamp(tx)
 			if err != nil {
@@ -1526,13 +1526,13 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 		for i := range subs {
 			sub := &subs[i]
-			if target.Scope == SubscriptionUsageScopeXCode {
-				if err := validateXCodeFundingSubscription(sub, userId, now); err != nil {
+			if target.Scope == SubscriptionUsageScopeZen {
+				if err := validateZenFundingSubscription(sub, userId, now); err != nil {
 					return err
 				}
 			}
 			var plan *SubscriptionPlan
-			if sub.UsageScope != SubscriptionUsageScopeXCode {
+			if sub.UsageScope != SubscriptionUsageScopeZen {
 				var err error
 				plan, err = getSubscriptionPlanByIdTx(tx, sub.PlanId)
 				if err != nil {
@@ -1553,7 +1553,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 				RequestId: requestId, UserId: userId, UserSubscriptionId: sub.Id,
 				PreConsumed: amount, FundingScope: target.Scope, Status: "consumed",
 			}
-			if target.Scope == SubscriptionUsageScopeXCode {
+			if target.Scope == SubscriptionUsageScopeZen {
 				record.ResetGeneration = sub.QuotaResetGeneration
 				record.CycleReservedQuota = amount
 			}
@@ -1601,11 +1601,11 @@ func (record *SubscriptionPreConsumeRecord) matchesFundingTarget(userId int, tar
 	if target.Scope == SubscriptionUsageScopeGeneral {
 		return record.FundingScope == "" || record.FundingScope == SubscriptionUsageScopeGeneral
 	}
-	return record.FundingScope == SubscriptionUsageScopeXCode && record.UserSubscriptionId == target.SubscriptionID
+	return record.FundingScope == SubscriptionUsageScopeZen && record.UserSubscriptionId == target.SubscriptionID
 }
 
 // Replay locks the original instance before its request record. It cannot select
-// another user's balance or reinterpret a legacy native record as XCode funding.
+// another user's balance or reinterpret a legacy native record as aiscoo zen funding.
 func replaySubscriptionPreConsumeTx(tx *gorm.DB, hint *SubscriptionPreConsumeRecord, userId int, target SubscriptionFundingTarget) (*SubscriptionPreConsumeResult, error) {
 	if !hint.matchesFundingTarget(userId, target) {
 		return nil, ErrSubscriptionRequestConflict
@@ -1622,12 +1622,12 @@ func replaySubscriptionPreConsumeTx(tx *gorm.DB, hint *SubscriptionPreConsumeRec
 		sub.UserId != userId || record.Status != "consumed" {
 		return nil, ErrSubscriptionRequestConflict
 	}
-	if target.Scope == SubscriptionUsageScopeXCode {
+	if target.Scope == SubscriptionUsageScopeZen {
 		now, err := getDBTimestamp(tx)
 		if err != nil {
 			return nil, err
 		}
-		if err := validateXCodeFundingSubscription(&sub, userId, now); err != nil {
+		if err := validateZenFundingSubscription(&sub, userId, now); err != nil {
 			return nil, err
 		}
 	} else if sub.UsageScope != "" && sub.UsageScope != SubscriptionUsageScopeGeneral {
@@ -1646,7 +1646,7 @@ type SubscriptionReserveMutation struct {
 }
 
 // An admitted request always finishes against its original instance, not the current authorization.
-func lockXCodeSubscriptionRequestTx(tx *gorm.DB, requestID string, userID, subscriptionID int) (*UserSubscription, *SubscriptionPreConsumeRecord, error) {
+func lockZenSubscriptionRequestTx(tx *gorm.DB, requestID string, userID, subscriptionID int) (*UserSubscription, *SubscriptionPreConsumeRecord, error) {
 	if strings.TrimSpace(requestID) == "" || userID <= 0 || subscriptionID <= 0 {
 		return nil, nil, ErrSubscriptionFundingTargetInvalid
 	}
@@ -1654,7 +1654,7 @@ func lockXCodeSubscriptionRequestTx(tx *gorm.DB, requestID string, userID, subsc
 	if err := lockForUpdate(tx).First(&sub, subscriptionID).Error; err != nil {
 		return nil, nil, err
 	}
-	if sub.UserId != userID || sub.UsageScope != SubscriptionUsageScopeXCode {
+	if sub.UserId != userID || sub.UsageScope != SubscriptionUsageScopeZen {
 		return nil, nil, ErrSubscriptionRequestConflict
 	}
 	now, err := getDBTimestamp(tx)
@@ -1668,7 +1668,7 @@ func lockXCodeSubscriptionRequestTx(tx *gorm.DB, requestID string, userID, subsc
 	if err := lockForUpdate(tx).Where("request_id = ?", requestID).First(&record).Error; err != nil {
 		return nil, nil, err
 	}
-	if record.UserId != userID || record.UserSubscriptionId != sub.Id || record.FundingScope != SubscriptionUsageScopeXCode ||
+	if record.UserId != userID || record.UserSubscriptionId != sub.Id || record.FundingScope != SubscriptionUsageScopeZen ||
 		record.ResetGeneration <= 0 || record.ResetGeneration > sub.QuotaResetGeneration ||
 		record.PreConsumed < 0 || record.CycleReservedQuota < 0 || record.FinalQuota < 0 ||
 		sub.AmountUsed < 0 || sub.AmountTotal < 0 {
@@ -1682,15 +1682,15 @@ func lockXCodeSubscriptionRequestTx(tx *gorm.DB, requestID string, userID, subsc
 	return &sub, &record, nil
 }
 
-func (record *SubscriptionPreConsumeRecord) currentXCodeReservedQuota(sub *UserSubscription) int64 {
+func (record *SubscriptionPreConsumeRecord) currentZenReservedQuota(sub *UserSubscription) int64 {
 	if record.ResetGeneration == sub.QuotaResetGeneration {
 		return record.CycleReservedQuota
 	}
 	return 0
 }
 
-func saveXCodeRequestOccupancyTx(tx *gorm.DB, sub *UserSubscription, record *SubscriptionPreConsumeRecord, targetQuota int64) error {
-	current := record.currentXCodeReservedQuota(sub)
+func saveZenRequestOccupancyTx(tx *gorm.DB, sub *UserSubscription, record *SubscriptionPreConsumeRecord, targetQuota int64) error {
+	current := record.currentZenReservedQuota(sub)
 	if current > sub.AmountUsed {
 		return ErrSubscriptionRequestConflict
 	}
@@ -1708,13 +1708,13 @@ func saveXCodeRequestOccupancyTx(tx *gorm.DB, sub *UserSubscription, record *Sub
 	return tx.Save(record).Error
 }
 
-func ReserveXCodeSubscriptionRequest(requestID string, userID, subscriptionID int, targetQuota int64) (SubscriptionReserveMutation, error) {
+func ReserveZenSubscriptionRequest(requestID string, userID, subscriptionID int, targetQuota int64) (SubscriptionReserveMutation, error) {
 	if targetQuota < 0 {
 		return SubscriptionReserveMutation{}, ErrSubscriptionFundingTargetInvalid
 	}
 	var mutation SubscriptionReserveMutation
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		sub, record, err := lockXCodeSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
+		sub, record, err := lockZenSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
 		if err != nil {
 			return err
 		}
@@ -1723,9 +1723,9 @@ func ReserveXCodeSubscriptionRequest(requestID string, userID, subscriptionID in
 		}
 		mutation = SubscriptionReserveMutation{
 			Generation:            sub.QuotaResetGeneration,
-			PreviousReservedQuota: record.currentXCodeReservedQuota(sub), ReservedQuota: targetQuota,
+			PreviousReservedQuota: record.currentZenReservedQuota(sub), ReservedQuota: targetQuota,
 		}
-		return saveXCodeRequestOccupancyTx(tx, sub, record, targetQuota)
+		return saveZenRequestOccupancyTx(tx, sub, record, targetQuota)
 	})
 	if err != nil {
 		return SubscriptionReserveMutation{}, err
@@ -1733,12 +1733,12 @@ func ReserveXCodeSubscriptionRequest(requestID string, userID, subscriptionID in
 	return mutation, nil
 }
 
-func RollbackXCodeSubscriptionReserve(requestID string, userID, subscriptionID int, mutation SubscriptionReserveMutation) error {
+func RollbackZenSubscriptionReserve(requestID string, userID, subscriptionID int, mutation SubscriptionReserveMutation) error {
 	if mutation.Generation <= 0 || mutation.PreviousReservedQuota < 0 || mutation.ReservedQuota < 0 {
 		return ErrSubscriptionFundingTargetInvalid
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		sub, record, err := lockXCodeSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
+		sub, record, err := lockZenSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
 		if err != nil {
 			return err
 		}
@@ -1751,16 +1751,16 @@ func RollbackXCodeSubscriptionReserve(requestID string, userID, subscriptionID i
 		if record.ResetGeneration != mutation.Generation || record.CycleReservedQuota != mutation.ReservedQuota {
 			return ErrSubscriptionRequestConflict
 		}
-		return saveXCodeRequestOccupancyTx(tx, sub, record, mutation.PreviousReservedQuota)
+		return saveZenRequestOccupancyTx(tx, sub, record, mutation.PreviousReservedQuota)
 	})
 }
 
-func SettleXCodeSubscriptionRequest(requestID string, userID, subscriptionID int, actualQuota int64) error {
+func SettleZenSubscriptionRequest(requestID string, userID, subscriptionID int, actualQuota int64) error {
 	if actualQuota < 0 {
 		return ErrSubscriptionFundingTargetInvalid
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		sub, record, err := lockXCodeSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
+		sub, record, err := lockZenSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
 		if err != nil {
 			return err
 		}
@@ -1775,13 +1775,13 @@ func SettleXCodeSubscriptionRequest(requestID string, userID, subscriptionID int
 		}
 		record.Status = "settled"
 		record.FinalQuota = actualQuota
-		return saveXCodeRequestOccupancyTx(tx, sub, record, actualQuota)
+		return saveZenRequestOccupancyTx(tx, sub, record, actualQuota)
 	})
 }
 
-func RefundXCodeSubscriptionRequest(requestID string, userID, subscriptionID int) error {
+func RefundZenSubscriptionRequest(requestID string, userID, subscriptionID int) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
-		sub, record, err := lockXCodeSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
+		sub, record, err := lockZenSubscriptionRequestTx(tx, requestID, userID, subscriptionID)
 		if err != nil {
 			return err
 		}
@@ -1790,7 +1790,7 @@ func RefundXCodeSubscriptionRequest(requestID string, userID, subscriptionID int
 		}
 		record.Status = "refunded"
 		record.FinalQuota = 0
-		return saveXCodeRequestOccupancyTx(tx, sub, record, 0)
+		return saveZenRequestOccupancyTx(tx, sub, record, 0)
 	})
 }
 
@@ -1872,7 +1872,7 @@ func ResetDueSubscriptions(limit int) (int, error) {
 			resetNow := now
 			var plan *SubscriptionPlan
 			var err error
-			if locked.UsageScope == SubscriptionUsageScopeXCode {
+			if locked.UsageScope == SubscriptionUsageScopeZen {
 				resetNow, err = getDBTimestamp(tx)
 				if err != nil {
 					return err
@@ -1913,7 +1913,7 @@ func CleanupSubscriptionPreConsumeRecords(olderThanSeconds int64) (int64, error)
 	}
 	cutoff := GetDBTimestamp() - olderThanSeconds
 	res := DB.Where("updated_at < ?", cutoff).
-		Where("funding_scope IS NULL OR funding_scope <> ? OR status IN ?", SubscriptionUsageScopeXCode, []string{"settled", "refunded"}).
+		Where("funding_scope IS NULL OR funding_scope <> ? OR status IN ?", SubscriptionUsageScopeZen, []string{"settled", "refunded"}).
 		Delete(&SubscriptionPreConsumeRecord{})
 	return res.RowsAffected, res.Error
 }

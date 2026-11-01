@@ -27,7 +27,7 @@ func AnonymousRequestBodyLimit() gin.HandlerFunc {
 				if common.IsRequestBodyTooLargeError(err) {
 					status, code = http.StatusRequestEntityTooLarge, "XCODE_REQUEST_TOO_LARGE"
 				}
-				abortXCodeFacadeError(c, status, code)
+				abortZenFacadeError(c, status, code)
 				return
 			}
 			if common.IsRequestBodyTooLargeError(err) {

@@ -1049,7 +1049,7 @@ export function extractUsage() { return {seconds:2}; }
 func TestManagedFreeTaskCreatesFundingFactBeforeSubmission(t *testing.T) {
 	db := setupRelayChannelDB(t)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{},
-		&model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.XCodeAuthorization{}))
+		&model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.ZenAuthorization{}))
 	saveBillingConfig(t)
 	savedPrices := ratio_setting.ModelPrice2JSONString()
 	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
@@ -1068,11 +1068,11 @@ func TestManagedFreeTaskCreatesFundingFactBeforeSubmission(t *testing.T) {
 	plan := model.SubscriptionPlan{Title: "managed-free-task", TotalAmount: 100, QuotaResetPeriod: model.SubscriptionResetNever}
 	require.NoError(t, db.Create(&plan).Error)
 	now := model.GetDBTimestamp()
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeXCode,
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeZen,
 		Source: "admin", Status: "active", AmountTotal: 100, StartTime: now - 60, EndTime: now + 3600,
 		QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
 	require.NoError(t, db.Create(&sub).Error)
-	require.NoError(t, db.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
+	require.NoError(t, db.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
 
 	service.InitHttpClient()
 	var factAtSubmit model.SubscriptionPreConsumeRecord
@@ -1090,7 +1090,7 @@ func TestManagedFreeTaskCreatesFundingFactBeforeSubmission(t *testing.T) {
 	info.UserGroup, info.UsingGroup, info.OriginModelName = "default", "default", "declared-model"
 	info.RequestId = "managed-free-task"
 	info.UserSetting = kitdto.UserSetting{BillingPreference: "wallet_only"}
-	info.ClientPurpose, info.FundingScope = model.ClientPurposeXCode, model.SubscriptionUsageScopeXCode
+	info.ClientPurpose, info.FundingScope = model.ClientPurposeZen, model.SubscriptionUsageScopeZen
 	info.FundingSubscriptionID, info.FundingAuthorizationRevision = sub.Id, 1
 
 	result, taskErr := RelayTaskSubmit(c, info)

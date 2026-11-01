@@ -325,7 +325,7 @@ func TestChannelTestConfiguredOutputBudget(t *testing.T) {
 			user := model.User{Username: "channel-budget-test", Group: "default", Status: common.UserStatusEnabled, Setting: `{"accept_unset_model_ratio_model":true}`}
 			require.NoError(t, db.Create(&user).Error)
 			if !tt.missing {
-				config := strings.Replace(xcodeModelConfigFixture(tt.apiType), `"max":128`, `"max":`+tt.maximum, 1)
+				config := strings.Replace(zenModelConfigFixture(tt.apiType), `"max":128`, `"max":`+tt.maximum, 1)
 				if tt.configOff {
 					config = strings.Replace(config, `"enabled":true`, `"enabled":false`, 1)
 				}
@@ -344,7 +344,7 @@ func TestChannelTestConfiguredOutputBudget(t *testing.T) {
 				if metadataName == "" {
 					metadataName = tt.modelName
 				}
-				metadata := model.Model{ModelName: metadataName, NameRule: tt.nameRule, Status: 1, XCodeConfig: model.LongText(config)}
+				metadata := model.Model{ModelName: metadataName, NameRule: tt.nameRule, Status: 1, ZenConfig: model.LongText(config)}
 				require.NoError(t, db.Create(&metadata).Error)
 				if tt.disabled {
 					require.NoError(t, db.Model(&metadata).Update("status", 0).Error)

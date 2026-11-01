@@ -450,7 +450,7 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 	if relayInfo == nil {
 		return result, errors.New("relayInfo is nil")
 	}
-	if relayInfo.ClientPurpose == model.ClientPurposeXCode || relayInfo.FundingScope == model.SubscriptionUsageScopeXCode {
+	if relayInfo.ClientPurpose == model.ClientPurposeZen || relayInfo.FundingScope == model.SubscriptionUsageScopeZen {
 		return result, model.ErrSubscriptionFundingTargetInvalid
 	}
 	if preConsumedQuota < 0 || quota == math.MinInt ||
@@ -536,10 +536,10 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 		}
 		total := relayInfo.SubscriptionAmountTotal
 		var usedAfter int64
-		if relayInfo.ClientPurpose == model.ClientPurposeXCode || relayInfo.FundingScope == model.SubscriptionUsageScopeXCode {
+		if relayInfo.ClientPurpose == model.ClientPurposeZen || relayInfo.FundingScope == model.SubscriptionUsageScopeZen {
 			var sub model.UserSubscription
 			if err := model.DB.Select("amount_total", "amount_used").
-				Where("id = ? AND user_id = ? AND usage_scope = ?", relayInfo.SubscriptionId, relayInfo.UserId, model.SubscriptionUsageScopeXCode).
+				Where("id = ? AND user_id = ? AND usage_scope = ?", relayInfo.SubscriptionId, relayInfo.UserId, model.SubscriptionUsageScopeZen).
 				First(&sub).Error; err != nil {
 				common.SysError(fmt.Sprintf("failed to read managed subscription quota notification user=%d subscription=%d: %v", relayInfo.UserId, relayInfo.SubscriptionId, err))
 				return

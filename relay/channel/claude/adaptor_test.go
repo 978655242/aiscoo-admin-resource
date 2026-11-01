@@ -74,7 +74,7 @@ func TestManagedClaudeOutgoingMaxTokensPreservesExplicitZero(t *testing.T) {
 					}
 					info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-sonnet-4-5"}}
 					if managed {
-						info.ClientPurpose = model.ClientPurposeXCode
+						info.ClientPurpose = model.ClientPurposeZen
 					}
 					adaptor := &Adaptor{}
 					var outgoing any
@@ -113,7 +113,7 @@ func TestManagedClaudeConversionEntryPointsPreserveExplicitZero(t *testing.T) {
 				if converter == relayconvert.ConverterOpenAIResponsesToClaudeMessages {
 					request = &dto.OpenAIResponsesRequest{Model: "claude-sonnet-4-5", MaxOutputTokens: &zero, Input: []byte(`"hello"`)}
 				}
-				info := &relaycommon.RelayInfo{ClientPurpose: model.ClientPurposeXCode, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-sonnet-4-5"}}
+				info := &relaycommon.RelayInfo{ClientPurpose: model.ClientPurposeZen, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-sonnet-4-5"}}
 				var result *relayconvert.RequestResult
 				var err error
 				switch entry {
@@ -153,7 +153,7 @@ func TestManagedClaudeOutgoingMaxTokensPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "claude-sonnet-4-5"}}
 			if tc.managed {
-				info.ClientPurpose = model.ClientPurposeXCode
+				info.ClientPurpose = model.ClientPurposeZen
 			}
 			outgoing, err := (&Adaptor{}).ConvertOpenAIRequest(nil, info, &dto.GeneralOpenAIRequest{
 				Model: "claude-sonnet-4-5", MaxCompletionTokens: &tc.completion, MaxTokens: &tc.maxTokens,
@@ -257,7 +257,7 @@ func TestConvertClaudeRequestZeroMaxTokensStillRaisesThinkingBudget(t *testing.T
 				},
 			}
 			if managed {
-				info.ClientPurpose = model.ClientPurposeXCode
+				info.ClientPurpose = model.ClientPurposeZen
 			}
 			outbound, err := common.DeepCopy(original)
 			require.NoError(t, err)

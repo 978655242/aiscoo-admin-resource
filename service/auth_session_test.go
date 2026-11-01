@@ -238,7 +238,7 @@ func TestCreateLoginSessionRejectsProofInvalidatedBeforeOwnerLock(t *testing.T) 
 	}
 }
 
-func TestXCodeSourceGuardChecksDenyAuthorityBeforeOwnerLock(t *testing.T) {
+func TestZenSourceGuardChecksDenyAuthorityBeforeOwnerLock(t *testing.T) {
 	for _, deny := range []string{"session", "auth_version", "cache_unavailable"} {
 		t.Run(deny, func(t *testing.T) {
 			useTestSessionSecret(t)
@@ -264,7 +264,7 @@ func TestXCodeSourceGuardChecksDenyAuthorityBeforeOwnerLock(t *testing.T) {
 			t.Cleanup(func() { _ = model.DB.Callback().Query().Remove(callback) })
 
 			err = model.DB.Transaction(func(tx *gorm.DB) error {
-				_, _, err := model.ValidateXCodeSourceSessionWithTx(tx, user.Id, bundle.Session.SID, 1, 0, model.ClientPurposeDashboard)
+				_, _, err := model.ValidateZenSourceSessionWithTx(tx, user.Id, bundle.Session.SID, 1, 0, model.ClientPurposeDashboard)
 				return err
 			})
 			require.Error(t, err)
@@ -278,7 +278,7 @@ func TestXCodeSourceGuardChecksDenyAuthorityBeforeOwnerLock(t *testing.T) {
 	}
 }
 
-func TestXCodeSourceGuardRechecksDenyAuthorityAfterSIDLock(t *testing.T) {
+func TestZenSourceGuardRechecksDenyAuthorityAfterSIDLock(t *testing.T) {
 	for _, deny := range []string{"session", "auth_version"} {
 		t.Run(deny, func(t *testing.T) {
 			useTestSessionSecret(t)
@@ -301,7 +301,7 @@ func TestXCodeSourceGuardRechecksDenyAuthorityAfterSIDLock(t *testing.T) {
 			t.Cleanup(func() { _ = model.DB.Callback().Query().Remove(callback) })
 
 			err = model.DB.Transaction(func(tx *gorm.DB) error {
-				_, _, err := model.ValidateXCodeSourceSessionWithTx(tx, user.Id, bundle.Session.SID, 1, 0, model.ClientPurposeDashboard)
+				_, _, err := model.ValidateZenSourceSessionWithTx(tx, user.Id, bundle.Session.SID, 1, 0, model.ClientPurposeDashboard)
 				return err
 			})
 			assert.ErrorIs(t, err, model.ErrUserSessionInactive, "a denial published during authority locking must invalidate the source")
@@ -467,30 +467,30 @@ func TestLoginSessionCreateRefreshAndRevoke(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrLoginSessionRevoked))
 }
 
-func TestXCodeCLIRegisteredRedirects(t *testing.T) {
+func TestZenCLIRegisteredRedirects(t *testing.T) {
 	challenge := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	for _, redirect := range []string{"http://127.0.0.1:49152/oauth/callback", "http://127.0.0.1:65535/oauth/callback"} {
-		input := XCodeAuthorizeRequest{ClientID: "xwork-cli", ResponseType: "code", RedirectURI: redirect, State: strings.Repeat("s", 32), CodeChallenge: challenge, CodeChallengeMethod: "S256"}
-		assert.True(t, validateXCodeAuthorizationRequest(input), redirect)
+		input := ZenAuthorizeRequest{ClientID: "xwork-cli", ResponseType: "code", RedirectURI: redirect, State: strings.Repeat("s", 32), CodeChallenge: challenge, CodeChallengeMethod: "S256"}
+		assert.True(t, validateZenAuthorizationRequest(input), redirect)
 	}
-	for _, redirect := range []string{"http://localhost:49152/oauth/callback", "http://127.1:49152/oauth/callback", "http://2130706433:49152/oauth/callback", "http://[::1]:49152/oauth/callback", "http://127.0.0.1/oauth/callback", "http://127.0.0.1:0/oauth/callback", "http://127.0.0.1:65536/oauth/callback", "http://127.0.0.1:049152/oauth/callback", "http://user@127.0.0.1:49152/oauth/callback", "http://127.0.0.1:49152/oauth/callback?x=1", "http://127.0.0.1:49152/oauth/callback#x", "http://127.0.0.1:49152/oauth/%63allback", "http://127.0.0.1:49152/oauth/callback/", XCodeRedirectURI} {
-		input := XCodeAuthorizeRequest{ClientID: "xwork-cli", ResponseType: "code", RedirectURI: redirect, State: strings.Repeat("s", 32), CodeChallenge: challenge, CodeChallengeMethod: "S256"}
-		assert.False(t, validateXCodeAuthorizationRequest(input), redirect)
+	for _, redirect := range []string{"http://localhost:49152/oauth/callback", "http://127.1:49152/oauth/callback", "http://2130706433:49152/oauth/callback", "http://[::1]:49152/oauth/callback", "http://127.0.0.1/oauth/callback", "http://127.0.0.1:0/oauth/callback", "http://127.0.0.1:65536/oauth/callback", "http://127.0.0.1:049152/oauth/callback", "http://user@127.0.0.1:49152/oauth/callback", "http://127.0.0.1:49152/oauth/callback?x=1", "http://127.0.0.1:49152/oauth/callback#x", "http://127.0.0.1:49152/oauth/%63allback", "http://127.0.0.1:49152/oauth/callback/", ZenRedirectURI} {
+		input := ZenAuthorizeRequest{ClientID: "xwork-cli", ResponseType: "code", RedirectURI: redirect, State: strings.Repeat("s", 32), CodeChallenge: challenge, CodeChallengeMethod: "S256"}
+		assert.False(t, validateZenAuthorizationRequest(input), redirect)
 	}
 }
 
-func TestXCodeSessionRefreshPurposeAndManagedKeyFence(t *testing.T) {
+func TestZenSessionRefreshPurposeAndManagedKeyFence(t *testing.T) {
 	useTestSessionSecret(t)
 	user := setupAuthSessionTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Token{}))
 	session, secret, err := newLoginSession(user.Id, user.AuthVersion, "xcode", "127.0.0.1", "host")
 	require.NoError(t, err)
-	session.ClientPurpose = model.ClientPurposeXCode
+	session.ClientPurpose = model.ClientPurposeZen
 	session.ExpiresAt = time.Now().Add(time.Minute).Unix()
 	require.NoError(t, model.CreateUserSession(session))
 	key := &model.Token{
 		UserId: user.Id, Key: "managed-refresh-key", Name: "xcode", Status: common.TokenStatusEnabled,
-		UnlimitedQuota: true, ExpiredTime: session.ExpiresAt, ClientPurpose: model.ClientPurposeXCode,
+		UnlimitedQuota: true, ExpiredTime: session.ExpiresAt, ClientPurpose: model.ClientPurposeZen,
 		ClientSessionSID: session.SID,
 	}
 	require.NoError(t, model.DB.Create(key).Error)
@@ -498,30 +498,30 @@ func TestXCodeSessionRefreshPurposeAndManagedKeyFence(t *testing.T) {
 	identity := AuthIdentity{UserID: user.Id, SessionID: session.SID, UserAuthVersion: 1, SessionVersion: 1}
 	_, _, err = ValidateLoginSession(identity)
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied)
-	_, _, err = ValidateXCodeLoginSession(identity)
+	_, _, err = ValidateZenLoginSession(identity)
 	require.NoError(t, err)
 	_, _, err = RefreshLoginSession(raw, session.SID, "", "")
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied)
 	stored, err := model.GetUserSessionBySID(session.SID)
 	require.NoError(t, err)
 	assert.Equal(t, session.RefreshHash, stored.RefreshHash, "wrong-purpose refresh must not rotate")
-	_, err = RefreshXCodeSession(XCodeRefreshRequest{ClientID: "xwork-cli", SessionID: session.SID, RefreshToken: raw}, "", "")
+	_, err = RefreshZenSession(ZenRefreshRequest{ClientID: "xwork-cli", SessionID: session.SID, RefreshToken: raw}, "", "")
 	assert.Error(t, err, "CLI client must not refresh a legacy desktop SID")
 	stored, err = model.GetUserSessionBySID(session.SID)
 	require.NoError(t, err)
 	assert.Equal(t, session.RefreshHash, stored.RefreshHash)
-	assert.Error(t, LogoutXCodeSession(&identity, XCodeLogoutRequest{ClientID: "xwork-cli", SessionID: session.SID}), "wrong client must not revoke desktop SID even with control credential")
-	_, _, err = ValidateXCodeLoginSession(identity)
+	assert.Error(t, LogoutZenSession(&identity, ZenLogoutRequest{ClientID: "xwork-cli", SessionID: session.SID}), "wrong client must not revoke desktop SID even with control credential")
+	_, _, err = ValidateZenLoginSession(identity)
 	require.NoError(t, err)
 
-	refreshed, _, err := RefreshXCodeLoginSession(raw, session.SID, "", "")
+	refreshed, _, err := RefreshZenLoginSession(raw, session.SID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, session.ExpiresAt, refreshed.AccessExpiresAt)
-	_, err = ParseXCodeAccessToken(refreshed.AccessToken)
+	_, err = ParseZenAccessToken(refreshed.AccessToken)
 	require.NoError(t, err)
 	_, _, err = RefreshLoginSession(raw, session.SID, "", "")
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied, "race recovery must never issue a dashboard token")
-	recovered, _, err := RefreshXCodeLoginSession(raw, session.SID, "", "")
+	recovered, _, err := RefreshZenLoginSession(raw, session.SID, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, refreshed.RefreshToken, recovered.RefreshToken)
 	assert.ErrorIs(t, RevokeByRefreshToken(recovered.RefreshToken, session.SID, "logout"), ErrAuthCredentialScopeDenied)
@@ -529,25 +529,25 @@ func TestXCodeSessionRefreshPurposeAndManagedKeyFence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusActive, stored.Status)
 	require.NoError(t, model.DB.Model(key).Update("status", common.TokenStatusDisabled).Error)
-	_, _, err = RefreshXCodeLoginSession(recovered.RefreshToken, session.SID, "", "")
+	_, _, err = RefreshZenLoginSession(recovered.RefreshToken, session.SID, "", "")
 	assert.ErrorIs(t, err, ErrLoginSessionRevoked)
 	storedAfter, err := model.GetUserSessionBySID(session.SID)
 	require.NoError(t, err)
 	assert.Equal(t, stored.RefreshHash, storedAfter.RefreshHash, "invalid managed key must prevent rotation")
 	native, err := CreateLoginSession(user.Id, "password", "", "")
 	require.NoError(t, err)
-	assert.ErrorIs(t, LogoutXCodeSession(nil, XCodeLogoutRequest{ClientID: XCodeClientID, SessionID: native.Session.SID, RefreshToken: native.RefreshToken}), ErrAuthCredentialScopeDenied)
-	require.NoError(t, LogoutXCodeSession(nil, XCodeLogoutRequest{ClientID: XCodeClientID, SessionID: session.SID, RefreshToken: recovered.RefreshToken}))
+	assert.ErrorIs(t, LogoutZenSession(nil, ZenLogoutRequest{ClientID: ZenClientID, SessionID: native.Session.SID, RefreshToken: native.RefreshToken}), ErrAuthCredentialScopeDenied)
+	require.NoError(t, LogoutZenSession(nil, ZenLogoutRequest{ClientID: ZenClientID, SessionID: session.SID, RefreshToken: recovered.RefreshToken}))
 	storedAfter, err = model.GetUserSessionBySID(session.SID)
 	require.NoError(t, err)
 	assert.Equal(t, model.UserSessionStatusRevoked, storedAfter.Status)
 	nativeIdentity, err := ParseAccessToken(native.AccessToken)
 	require.NoError(t, err)
 	_, _, err = ValidateLoginSession(nativeIdentity)
-	require.NoError(t, err, "XCode logout preserves the independent dashboard session")
+	require.NoError(t, err, "aiscoo zen logout preserves the independent dashboard session")
 }
 
-func TestNativeLiveBundleExpiryAndXCodeRefreshFence(t *testing.T) {
+func TestNativeLiveBundleExpiryAndZenRefreshFence(t *testing.T) {
 	useTestSessionSecret(t)
 	user := setupAuthSessionTestDB(t)
 	session, secret, err := newLoginSession(user.Id, user.AuthVersion, "password", "", "")
@@ -559,9 +559,9 @@ func TestNativeLiveBundleExpiryAndXCodeRefreshFence(t *testing.T) {
 	assert.Equal(t, session.ExpiresAt, bundle.AccessExpiresAt)
 	identity, err := ParseAccessToken(bundle.AccessToken)
 	require.NoError(t, err)
-	_, _, err = ValidateXCodeLoginSession(identity)
+	_, _, err = ValidateZenLoginSession(identity)
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied)
-	_, _, err = RefreshXCodeLoginSession(bundle.RefreshToken, session.SID, "", "")
+	_, _, err = RefreshZenLoginSession(bundle.RefreshToken, session.SID, "", "")
 	assert.ErrorIs(t, err, ErrAuthCredentialScopeDenied)
 }
 

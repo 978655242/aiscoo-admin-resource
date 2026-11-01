@@ -40,7 +40,7 @@ type Model struct {
 	Tags               string         `json:"tags,omitempty" gorm:"type:varchar(255)"`
 	VendorID           int            `json:"vendor_id,omitempty" gorm:"index"`
 	Endpoints          string         `json:"endpoints,omitempty" gorm:"type:text"`
-	XCodeConfig        LongText       `json:"xcode_config,omitempty"`
+	ZenConfig          LongText       `json:"xcode_config,omitempty" gorm:"column:x_code_config"`
 	SupportedEndpoints []string       `json:"supported_endpoints,omitempty" gorm:"-"`
 	Status             int            `json:"status" gorm:"default:1"`
 	SyncOfficial       int            `json:"sync_official" gorm:"default:1"`
@@ -235,8 +235,8 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 }
 
 func (mi *Model) Insert() error {
-	if mi.XCodeConfig != "" {
-		if _, err := ParseXCodeModelMetadata(string(mi.XCodeConfig)); err != nil {
+	if mi.ZenConfig != "" {
+		if _, err := ParseZenModelMetadata(string(mi.ZenConfig)); err != nil {
 			return err
 		}
 	}
@@ -264,10 +264,10 @@ func IsModelNameDuplicated(id int, name string) (bool, error) {
 	return cnt > 0, err
 }
 
-// Update excludes an omitted XCode patch from the write, even for stale callers.
-func (mi *Model) Update(xcodeConfig *string) error {
-	if xcodeConfig != nil && *xcodeConfig != "" {
-		if _, err := ParseXCodeModelMetadata(*xcodeConfig); err != nil {
+// Update excludes an omitted aiscoo zen patch from the write, even for stale callers.
+func (mi *Model) Update(zenConfig *string) error {
+	if zenConfig != nil && *zenConfig != "" {
+		if _, err := ParseZenModelMetadata(*zenConfig); err != nil {
 			return err
 		}
 	}
@@ -280,9 +280,9 @@ func (mi *Model) Update(xcodeConfig *string) error {
 			return err
 		}
 		fields := []string{"model_name", "description", "icon", "tags", "vendor_id", "endpoints", "status", "sync_official", "name_rule", "updated_time"}
-		mi.XCodeConfig = current.XCodeConfig
-		if xcodeConfig != nil {
-			mi.XCodeConfig = LongText(*xcodeConfig)
+		mi.ZenConfig = current.ZenConfig
+		if zenConfig != nil {
+			mi.ZenConfig = LongText(*zenConfig)
 			fields = append(fields, "x_code_config")
 		}
 		mi.UpdatedTime = common.GetTimestamp()

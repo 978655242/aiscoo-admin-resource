@@ -193,7 +193,7 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) 
 			"funding_applied": failure.FundingApplied,
 		})
 	}
-	managed := relayInfo.ClientPurpose == model.ClientPurposeXCode || relayInfo.FundingScope == model.SubscriptionUsageScopeXCode
+	managed := relayInfo.ClientPurpose == model.ClientPurposeZen || relayInfo.FundingScope == model.SubscriptionUsageScopeZen
 	// billing_source: "wallet" or "subscription"
 	if relayInfo.BillingSource != "" {
 		other.SetPublic("billing_source", relayInfo.BillingSource)

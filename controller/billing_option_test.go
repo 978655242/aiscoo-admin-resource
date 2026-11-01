@@ -16,7 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	xcodeDTO "github.com/QuantumNous/new-api/dto"
+	zenDTO "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -319,7 +319,7 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 
 // These fixtures catch cross-domain selection, fallback and request-id replay
 // bugs at the real billing entry point, rather than accepting an HTTP success.
-func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
+func TestZenFundingPolicyDatabaseMatrix(t *testing.T) {
 	// 原因：独立运行会直接进入原生计费错误翻译，必须显式初始化，不能依赖其他测试顺序。
 	require.NoError(t, i18n.Init())
 	previousConfig := config.GlobalConfig.ExportAllConfigs()
@@ -342,7 +342,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 			require.NoError(t, db.AutoMigrate(
 				&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{},
-				&model.SubscriptionPreConsumeRecord{}, &model.XCodeAuthorization{},
+				&model.SubscriptionPreConsumeRecord{}, &model.ZenAuthorization{},
 				&model.Token{}, &model.UserSession{},
 			))
 			type fundingFixture struct {
@@ -370,7 +370,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 				t.Cleanup(func() { model.InvalidateSubscriptionPlanCache(plan.Id) })
 				now := model.GetDBTimestamp()
 				// Earlier-expiring non-general instances tempt the old unscoped query.
-				for i, scope := range []string{model.SubscriptionUsageScopeGeneral, model.SubscriptionUsageScopeXCode, model.SubscriptionUsageScopeXCode, "future"} {
+				for i, scope := range []string{model.SubscriptionUsageScopeGeneral, model.SubscriptionUsageScopeZen, model.SubscriptionUsageScopeZen, "future"} {
 					f.subscriptions[i] = model.UserSubscription{
 						UserId: f.user.Id, PlanId: plan.Id, UsageScope: scope, Source: "admin",
 						AmountTotal: 100, AmountUsed: 10, Status: "active",
@@ -380,15 +380,15 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 					}
 					require.NoError(t, db.Create(&f.subscriptions[i]).Error)
 				}
-				authorization := model.XCodeAuthorization{UserId: f.user.Id, SubscriptionId: f.subscriptions[1].Id, Revision: 7}
+				authorization := model.ZenAuthorization{UserId: f.user.Id, SubscriptionId: f.subscriptions[1].Id, Revision: 7}
 				require.NoError(t, db.Create(&authorization).Error)
 				f.target = model.SubscriptionFundingTarget{
-					Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: f.subscriptions[1].Id, AuthorizationRevision: 7,
+					Scope: model.SubscriptionUsageScopeZen, SubscriptionID: f.subscriptions[1].Id, AuthorizationRevision: 7,
 				}
 				sid := fmt.Sprintf("funding-session-%d", sequence)
 				require.NoError(t, db.Create(&model.UserSession{
 					SID: sid, UserID: f.user.Id, Version: 1, UserAuthVersion: 1,
-					Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeXCode,
+					Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeZen,
 					RefreshHash: strings.Repeat("a", 64), LoginMethod: "password",
 					LastActiveAt: now, ExpiresAt: now + 86400,
 				}).Error)
@@ -401,7 +401,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 				f.managedToken = model.Token{
 					UserId: f.user.Id, Key: fmt.Sprintf("funding-managed-token-%d", sequence),
 					Status: common.TokenStatusEnabled, ExpiredTime: now + 86400, UnlimitedQuota: true,
-					ClientPurpose: model.ClientPurposeXCode, ClientSessionSID: sid,
+					ClientPurpose: model.ClientPurposeZen, ClientSessionSID: sid,
 				}
 				require.NoError(t, db.Create(&f.managedToken).Error)
 				return f
@@ -411,7 +411,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 				target, purpose := generalTarget, model.ClientPurposeGeneral
 				token := f.token
 				if managed {
-					target, purpose = f.target, model.ClientPurposeXCode
+					target, purpose = f.target, model.ClientPurposeZen
 					token = f.managedToken
 				}
 				ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -534,7 +534,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 					channel := model.Channel{Id: i + 1, Name: protocol.modelID, Type: 1, Key: "fixture-upstream", Status: common.ChannelStatusEnabled, Group: "default", Models: protocol.modelID}
 					require.NoError(t, db.Create(&channel).Error)
 					require.NoError(t, db.Create(&model.Ability{Group: "default", Model: protocol.modelID, ChannelId: channel.Id, Enabled: true}).Error)
-					require.NoError(t, db.Create(&model.Model{ModelName: protocol.modelID, NameRule: model.NameRuleExact, Status: 1, XCodeConfig: model.LongText(xcodeModelConfigFixture(protocol.apiType))}).Error)
+					require.NoError(t, db.Create(&model.Model{ModelName: protocol.modelID, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(zenModelConfigFixture(protocol.apiType))}).Error)
 					router := gin.New()
 					router.POST(protocol.path, middleware.TokenAuth(), func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyOriginalModel, protocol.modelID)
@@ -590,11 +590,11 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 					status := http.StatusConflict
 					switch failure {
 					case "unassigned":
-						require.NoError(t, db.Where("user_id = ?", f.user.Id).Delete(&model.XCodeAuthorization{}).Error)
+						require.NoError(t, db.Where("user_id = ?", f.user.Id).Delete(&model.ZenAuthorization{}).Error)
 						code = types.ErrorCode("XCODE_PLAN_UNASSIGNED")
 						status = http.StatusForbidden
 					case "revision":
-						require.NoError(t, db.Model(&model.XCodeAuthorization{}).Where("user_id = ?", f.user.Id).Update("revision", 8).Error)
+						require.NoError(t, db.Model(&model.ZenAuthorization{}).Where("user_id = ?", f.user.Id).Update("revision", 8).Error)
 					case "other instance":
 						f.target.SubscriptionID = f.subscriptions[2].Id
 					}
@@ -604,7 +604,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 					assert.Equal(t, code, apiErr.GetErrorCode())
 					assert.Equal(t, status, apiErr.StatusCode)
 					if failure != "other instance" {
-						assert.Contains(t, apiErr.Error(), "aiscoo client")
+						assert.Contains(t, apiErr.Error(), "aiscoo zen")
 					}
 					balances(t, f, 100, [4]int64{10, 10, 10, 10})
 				})
@@ -652,10 +652,10 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Model(&model.SubscriptionPreConsumeRecord{}).Where("request_id = ?", requestID).Count(&count).Error)
 					assert.EqualValues(t, 1, count)
 					if firstManaged {
-						require.NoError(t, db.Model(&model.XCodeAuthorization{}).Where("user_id = ?", f.user.Id).Updates(map[string]any{
+						require.NoError(t, db.Model(&model.ZenAuthorization{}).Where("user_id = ?", f.user.Id).Updates(map[string]any{
 							"subscription_id": f.subscriptions[2].Id, "revision": 8,
 						}).Error)
-						newTarget := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: f.subscriptions[2].Id, AuthorizationRevision: 8}
+						newTarget := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: f.subscriptions[2].Id, AuthorizationRevision: 8}
 						result, err = model.PreConsumeUserSubscription(requestID, f.user.Id, "funding-model", 0, 20, newTarget)
 						require.ErrorIs(t, err, model.ErrSubscriptionRequestConflict)
 						assert.Nil(t, result)
@@ -672,7 +672,7 @@ func TestXCodeFundingPolicyDatabaseMatrix(t *testing.T) {
 	}
 }
 
-func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
+func TestZenRequestLifecycleDatabaseMatrix(t *testing.T) {
 	previousBatch := common.BatchUpdateEnabled
 	common.BatchUpdateEnabled = false
 	t.Cleanup(func() { common.BatchUpdateEnabled = previousBatch })
@@ -683,7 +683,7 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{},
-				&model.UserSubscription{}, &model.XCodeAuthorization{}, &model.SubscriptionPreConsumeRecord{}))
+				&model.UserSubscription{}, &model.ZenAuthorization{}, &model.SubscriptionPreConsumeRecord{}))
 			sequence := 0
 			newRequest := func(t *testing.T) (*service.BillingSession, *relaycommon.RelayInfo, model.UserSubscription) {
 				t.Helper()
@@ -703,15 +703,15 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 				t.Cleanup(func() { model.InvalidateSubscriptionPlanCache(plan.Id) })
 				now := model.GetDBTimestamp()
 				sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, Source: "admin",
-					UsageScope: model.SubscriptionUsageScopeXCode, Status: "active", AmountTotal: 1000,
+					UsageScope: model.SubscriptionUsageScopeZen, Status: "active", AmountTotal: 1000,
 					StartTime: now - 60, EndTime: now + 3600, QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
 				require.NoError(t, db.Create(&sub).Error)
-				require.NoError(t, db.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
+				require.NoError(t, db.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: sub.Id, Revision: 1}).Error)
 				ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 				ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 				info := &relaycommon.RelayInfo{UserId: user.Id, UserSetting: setting, TokenId: token.Id, TokenKey: token.Key,
 					RequestId: fmt.Sprintf("lifecycle%d", sequence), OriginModelName: "ledger-model", ForcePreConsume: true,
-					ClientPurpose: model.ClientPurposeXCode, FundingScope: model.SubscriptionUsageScopeXCode,
+					ClientPurpose: model.ClientPurposeZen, FundingScope: model.SubscriptionUsageScopeZen,
 					FundingSubscriptionID: sub.Id, FundingAuthorizationRevision: 1}
 				session, apiErr := service.NewBillingSession(ctx, info, 100)
 				require.Nil(t, apiErr)
@@ -774,10 +774,10 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 					reset(t, sub)
 					require.NoError(t, session.Settle(actual))
 					require.NoError(t, session.Settle(actual))
-					require.NoError(t, model.SettleXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id, int64(actual)))
-					require.NoError(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
+					require.NoError(t, model.SettleZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id, int64(actual)))
+					require.NoError(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
 					assertState(t, info, int64(actual), int64(actual), int64(actual), "settled")
-					require.ErrorIs(t, model.SettleXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id, int64(actual+1)), model.ErrSubscriptionRequestConflict)
+					require.ErrorIs(t, model.SettleZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id, int64(actual+1)), model.ErrSubscriptionRequestConflict)
 					var token model.Token
 					require.NoError(t, db.First(&token, info.TokenId).Error)
 					assert.Equal(t, 1000-actual, token.RemainQuota)
@@ -787,13 +787,13 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 			t.Run("refund old occupancy preserves new request", func(t *testing.T) {
 				_, info, sub := newRequest(t)
 				reset(t, sub)
-				target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: sub.Id, AuthorizationRevision: 1}
+				target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: sub.Id, AuthorizationRevision: 1}
 				_, err := model.PreConsumeUserSubscription(info.RequestId+"other", info.UserId, "ledger-model", 0, 40, target)
 				require.NoError(t, err)
-				require.NoError(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
-				require.NoError(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
+				require.NoError(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
+				require.NoError(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
 				assertState(t, info, 40, 0, 0, "refunded")
-				require.ErrorIs(t, model.SettleXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id, 100), model.ErrSubscriptionRequestConflict)
+				require.ErrorIs(t, model.SettleZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id, 100), model.ErrSubscriptionRequestConflict)
 			})
 			t.Run("cheaper retry reserves the highest amount after reset until settlement", func(t *testing.T) {
 				session, info, sub := newRequest(t)
@@ -817,20 +817,20 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 			for _, crossReset := range []bool{false, true} {
 				t.Run(fmt.Sprintf("rollback generation changed=%t", crossReset), func(t *testing.T) {
 					_, info, sub := newRequest(t)
-					mutation, err := model.ReserveXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id, 150)
+					mutation, err := model.ReserveZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id, 150)
 					require.NoError(t, err)
 					if crossReset {
 						reset(t, sub)
-						target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: sub.Id, AuthorizationRevision: 1}
+						target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: sub.Id, AuthorizationRevision: 1}
 						_, err = model.PreConsumeUserSubscription(info.RequestId+"other", info.UserId, "ledger-model", 0, 40, target)
 						require.NoError(t, err)
 					}
-					require.NoError(t, model.RollbackXCodeSubscriptionReserve(info.RequestId, info.UserId, sub.Id, mutation))
+					require.NoError(t, model.RollbackZenSubscriptionReserve(info.RequestId, info.UserId, sub.Id, mutation))
 					if crossReset {
 						var actual model.UserSubscription
 						require.NoError(t, db.First(&actual, sub.Id).Error)
 						assert.EqualValues(t, 40, actual.AmountUsed)
-						require.NoError(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
+						require.NoError(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
 						assertState(t, info, 40, 0, 0, "refunded")
 					} else {
 						assertState(t, info, 100, 100, 0, "consumed")
@@ -843,7 +843,7 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 				require.Error(t, session.Reserve(150))
 				assertState(t, info, 100, 100, 0, "consumed")
 				assert.Equal(t, 100, session.GetPreConsumedQuota())
-				require.NoError(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
+				require.NoError(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id))
 				assertState(t, info, 0, 0, 0, "refunded")
 			})
 			for _, closed := range []string{"cancelled", "expired"} {
@@ -852,7 +852,7 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 					replacement := sub
 					replacement.Id, replacement.AmountUsed = 0, 0
 					require.NoError(t, db.Create(&replacement).Error)
-					require.NoError(t, db.Model(&model.XCodeAuthorization{}).Where("user_id = ?", info.UserId).
+					require.NoError(t, db.Model(&model.ZenAuthorization{}).Where("user_id = ?", info.UserId).
 						Updates(map[string]any{"subscription_id": replacement.Id, "revision": 2}).Error)
 					now := model.GetDBTimestamp()
 					require.NoError(t, db.Model(&model.UserSubscription{}).Where("id = ?", sub.Id).Updates(map[string]any{
@@ -927,8 +927,8 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 				require.Error(t, service.SettleBilling(ctx, info, 100))
 				require.Error(t, session.Settle(-1))
 				require.Error(t, session.Reserve(-1))
-				require.Error(t, model.SettleXCodeSubscriptionRequest(info.RequestId, info.UserId+1, sub.Id, 10))
-				require.Error(t, model.RefundXCodeSubscriptionRequest(info.RequestId, info.UserId, sub.Id+1))
+				require.Error(t, model.SettleZenSubscriptionRequest(info.RequestId, info.UserId+1, sub.Id, 10))
+				require.Error(t, model.RefundZenSubscriptionRequest(info.RequestId, info.UserId, sub.Id+1))
 				assertState(t, info, 100, 100, 0, "consumed")
 			})
 			t.Run("cleanup retains unfinished managed fact", func(t *testing.T) {
@@ -955,7 +955,7 @@ func TestXCodeRequestLifecycleDatabaseMatrix(t *testing.T) {
 	}
 }
 
-func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
+func TestZenAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 	confirmPaymentComplianceForTest(t)
 	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
 		t.Run(dialect.kind, func(t *testing.T) {
@@ -964,7 +964,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 			require.NoError(t, db.AutoMigrate(
-				&model.SubscriptionPlan{}, &model.UserSubscription{}, &model.XCodeAuthorization{},
+				&model.SubscriptionPlan{}, &model.UserSubscription{}, &model.ZenAuthorization{},
 				&model.SubscriptionPreConsumeRecord{}, &model.UserSession{}, &model.UserAccessToken{},
 				&model.SubscriptionOrder{}, &model.Task{},
 			))
@@ -982,15 +982,15 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			router := gin.New()
 			router.Use(middleware.RequestId())
 			group := router.Group("/api/xcode/v1/admin", middleware.AdminAuth(), middleware.DisableCache())
-			group.GET("/users/:id/authorization", AdminGetXCodeAuthorization)
-			group.POST("/users/:id/authorization", AdminMutateXCodeAuthorization)
+			group.GET("/users/:id/authorization", AdminGetZenAuthorization)
+			group.POST("/users/:id/authorization", AdminMutateZenAuthorization)
 			router.POST("/api/subscription/admin/user_subscriptions/:id/invalidate", middleware.AdminAuth(), AdminInvalidateUserSubscription)
 			router.DELETE("/api/subscription/admin/user_subscriptions/:id", middleware.AdminAuth(), AdminDeleteUserSubscription)
 			path := fmt.Sprintf("/api/xcode/v1/admin/users/%d/authorization", user.Id)
 			type response struct {
-				Success bool                                 `json:"success"`
-				Code    string                               `json:"code"`
-				Data    *xcodeDTO.XCodeAuthorizationSnapshot `json:"data"`
+				Success bool                             `json:"success"`
+				Code    string                           `json:"code"`
+				Data    *zenDTO.ZenAuthorizationSnapshot `json:"data"`
 			}
 			request := func(method, target, credential string, input any) (*httptest.ResponseRecorder, response) {
 				t.Helper()
@@ -1003,13 +1003,13 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			}
 			mutate := func(action, revision string, planID int, advance *bool) (*httptest.ResponseRecorder, response) {
 				t.Helper()
-				input := xcodeDTO.XCodeAuthorizationMutation{Action: action, ExpectedRevision: revision, AdvanceResetTime: advance}
+				input := zenDTO.ZenAuthorizationMutation{Action: action, ExpectedRevision: revision, AdvanceResetTime: advance}
 				if planID > 0 {
 					input.PlanID = strconv.Itoa(planID)
 				}
 				return request(http.MethodPost, path, adminJWT, input)
 			}
-			read := func() *xcodeDTO.XCodeAuthorizationSnapshot {
+			read := func() *zenDTO.ZenAuthorizationSnapshot {
 				t.Helper()
 				recorder, output := request(http.MethodGet, path, adminJWT, nil)
 				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -1017,9 +1017,9 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 				require.NotNil(t, output.Data)
 				return output.Data
 			}
-			planA := model.SubscriptionPlan{Title: "XCode A", Enabled: true, DurationUnit: model.SubscriptionDurationCustom,
+			planA := model.SubscriptionPlan{Title: "aiscoo zen A", Enabled: true, DurationUnit: model.SubscriptionDurationCustom,
 				CustomSeconds: 7200, TotalAmount: 100, QuotaResetPeriod: model.SubscriptionResetCustom, QuotaResetCustomSeconds: 3600}
-			planB := model.SubscriptionPlan{Title: "XCode B", Enabled: true, DurationUnit: model.SubscriptionDurationCustom,
+			planB := model.SubscriptionPlan{Title: "aiscoo zen B", Enabled: true, DurationUnit: model.SubscriptionDurationCustom,
 				CustomSeconds: 7200, TotalAmount: 300, QuotaResetPeriod: model.SubscriptionResetNever}
 			require.NoError(t, db.Create(&planA).Error)
 			require.NoError(t, db.Create(&planB).Error)
@@ -1034,7 +1034,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, "0", read().AuthorizationRevision)
 			recorder, _ := request(http.MethodGet, path, userJWT, nil)
 			assert.Equal(t, http.StatusForbidden, recorder.Code)
-			recorder, _ = request(http.MethodPost, path, readPAT, xcodeDTO.XCodeAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(planA.Id)})
+			recorder, _ = request(http.MethodPost, path, readPAT, zenDTO.ZenAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(planA.Id)})
 			assert.Equal(t, http.StatusForbidden, recorder.Code)
 			recorder, _ = request(http.MethodGet, path, writePAT, nil)
 			assert.Equal(t, http.StatusForbidden, recorder.Code)
@@ -1073,7 +1073,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, int64(1), first.QuotaResetGeneration)
 			assert.Equal(t, first.StartTime*1000, *output.Data.Subscription.StartTime)
 			assert.Equal(t, first.NextResetTime*1000, *output.Data.Quota.NextResetTime)
-			target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: first.Id, AuthorizationRevision: 1}
+			target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: first.Id, AuthorizationRevision: 1}
 			_, err = model.PreConsumeUserSubscription("xcode-admin-inflight", user.Id, "model", 0, 20, target)
 			require.NoError(t, err)
 			require.NoError(t, db.Model(&planA).Updates(map[string]any{"total_amount": 999, "quota_reset_period": model.SubscriptionResetNever}).Error)
@@ -1096,7 +1096,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			assert.NotEqual(t, first.Id, secondID)
 			assert.Equal(t, "0", output.Data.Quota.Used)
 			assert.Equal(t, "300", *output.Data.Quota.Total)
-			require.NoError(t, model.SettleXCodeSubscriptionRequest("xcode-admin-inflight", user.Id, first.Id, 30))
+			require.NoError(t, model.SettleZenSubscriptionRequest("xcode-admin-inflight", user.Id, first.Id, 30))
 			require.NoError(t, db.First(&first, first.Id).Error)
 			assert.Equal(t, "cancelled", first.Status)
 			assert.Equal(t, int64(30), first.AmountUsed)
@@ -1174,7 +1174,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			assert.Nil(t, output.Data.Quota.Total)
 			assert.Nil(t, output.Data.Quota.Remaining)
 			assert.Nil(t, output.Data.Quota.UsedPercentage)
-			recorder, output = request(http.MethodPost, path, writePAT, xcodeDTO.XCodeAuthorizationMutation{Action: "revoke", ExpectedRevision: "12"})
+			recorder, output = request(http.MethodPost, path, writePAT, zenDTO.ZenAuthorizationMutation{Action: "revoke", ExpectedRevision: "12"})
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 			assert.Equal(t, "13", output.Data.AuthorizationRevision)
 			var latestUser model.User
@@ -1193,13 +1193,13 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Create(&boundaryUser).Error)
 					targetPath := fmt.Sprintf("/api/xcode/v1/admin/users/%d/authorization", boundaryUser.Id)
 					recorder, granted := request(http.MethodPost, targetPath, adminJWT,
-						xcodeDTO.XCodeAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(boundaryPlan.Id)})
+						zenDTO.ZenAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(boundaryPlan.Id)})
 					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 					id, err := strconv.Atoi(granted.Data.Subscription.ID)
 					require.NoError(t, err)
 					requestID := "boundary-request-" + action
 					_, err = model.PreConsumeUserSubscription(requestID, boundaryUser.Id, "model", 0, 20,
-						model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeXCode, SubscriptionID: id, AuthorizationRevision: 1})
+						model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeZen, SubscriptionID: id, AuthorizationRevision: 1})
 					require.NoError(t, err)
 					now := model.GetDBTimestamp()
 					require.NoError(t, db.Model(&model.UserSubscription{}).Where("id = ?", id).Updates(map[string]any{
@@ -1209,7 +1209,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 					if action == "native" {
 						recorder, _ = request(http.MethodPost, fmt.Sprintf("/api/subscription/admin/user_subscriptions/%d/invalidate", id), adminJWT, nil)
 					} else {
-						input := xcodeDTO.XCodeAuthorizationMutation{Action: action, ExpectedRevision: "1"}
+						input := zenDTO.ZenAuthorizationMutation{Action: action, ExpectedRevision: "1"}
 						if action == "replace" {
 							input.PlanID = strconv.Itoa(planB.Id)
 						}
@@ -1221,7 +1221,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 					assert.Equal(t, "cancelled", closed.Status)
 					assert.Equal(t, int64(2), closed.QuotaResetGeneration, "persist the due active cycle before closing it")
 					assert.Zero(t, closed.AmountUsed)
-					require.NoError(t, model.SettleXCodeSubscriptionRequest(requestID, boundaryUser.Id, id, 30))
+					require.NoError(t, model.SettleZenSubscriptionRequest(requestID, boundaryUser.Id, id, 30))
 					require.NoError(t, db.First(&closed, id).Error)
 					assert.Equal(t, int64(30), closed.AmountUsed)
 					assert.Equal(t, int64(2), closed.QuotaResetGeneration, "closed-instance settlement cannot create another period")
@@ -1230,7 +1230,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			var orphan *model.UserSubscription
 			require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
 				var err error
-				orphan, err = model.CreateUserSubscriptionFromPlanTx(tx, user.Id, &boundaryPlan, "admin", model.SubscriptionUsageScopeXCode)
+				orphan, err = model.CreateUserSubscriptionFromPlanTx(tx, user.Id, &boundaryPlan, "admin", model.SubscriptionUsageScopeZen)
 				return err
 			}))
 			task := model.Task{TaskID: "xcode-reference", UserId: user.Id, Status: model.TaskStatusInProgress,
@@ -1256,7 +1256,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 					targetPath := fmt.Sprintf("/api/xcode/v1/admin/users/%d/authorization", cacheUser.Id)
 					if action == "native-delete" {
 						require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
-							sub, err := model.CreateUserSubscriptionFromPlanTx(tx, cacheUser.Id, &groupPlan, "admin", model.SubscriptionUsageScopeXCode)
+							sub, err := model.CreateUserSubscriptionFromPlanTx(tx, cacheUser.Id, &groupPlan, "admin", model.SubscriptionUsageScopeZen)
 							if err == nil {
 								id = sub.Id
 							}
@@ -1264,7 +1264,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 						}))
 					} else {
 						recorder, granted := request(http.MethodPost, targetPath, adminJWT,
-							xcodeDTO.XCodeAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(groupPlan.Id)})
+							zenDTO.ZenAuthorizationMutation{Action: "grant", ExpectedRevision: "0", PlanID: strconv.Itoa(groupPlan.Id)})
 						require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 						id, err = strconv.Atoi(granted.Data.Subscription.ID)
 						require.NoError(t, err)
@@ -1291,7 +1291,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 						recorder, _ = request(http.MethodDelete, fmt.Sprintf("/api/subscription/admin/user_subscriptions/%d", id), adminJWT, nil)
 					case "dedicated-revoke":
 						auditAction = "xcode.authorization.revoke"
-						recorder, _ = request(http.MethodPost, targetPath, adminJWT, xcodeDTO.XCodeAuthorizationMutation{Action: "revoke", ExpectedRevision: "1"})
+						recorder, _ = request(http.MethodPost, targetPath, adminJWT, zenDTO.ZenAuthorizationMutation{Action: "revoke", ExpectedRevision: "1"})
 					}
 					require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 					var changedUser model.User
@@ -1301,7 +1301,7 @@ func TestXCodeAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 						var changed model.UserSubscription
 						require.NoError(t, db.First(&changed, id).Error)
 						assert.Equal(t, "cancelled", changed.Status)
-						var designation model.XCodeAuthorization
+						var designation model.ZenAuthorization
 						require.NoError(t, db.Where("user_id = ?", cacheUser.Id).First(&designation).Error)
 						assert.Equal(t, int64(2), designation.Revision)
 					}

@@ -253,13 +253,13 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 
 // A Responses plugin's origin task pins its channel across retries. The
 // managed authority must still be checked against the live ability each time.
-func TestXCodeOriginTaskRetryRechecksChannelAuthority(t *testing.T) {
+func TestZenOriginTaskRetryRechecksChannelAuthority(t *testing.T) {
 	service.InitHttpClient()
 	db := modelManagementDB(t, "sqlite", "")
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(4)
-	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Log{}, &model.XCodeAuthorization{}, &model.UserSubscription{}, &model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Log{}, &model.ZenAuthorization{}, &model.UserSubscription{}, &model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{}))
 	oldRetries, oldErrorLog, oldConsume, oldExport, oldBatch := common.RetryTimes, constant.ErrorLogEnabled, common.LogConsumeEnabled, common.DataExportEnabled, common.BatchUpdateEnabled
 	oldGroupRatios := ratio_setting.GroupRatio2JSONString()
 	common.RetryTimes, constant.ErrorLogEnabled = 1, false
@@ -344,9 +344,9 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 	origin := model.Task{TaskID: "origin-public", UserId: user.Id, ChannelId: channel.Id, Platform: "origin-retry", Status: model.TaskStatusSuccess, PrivateData: model.TaskPrivateData{UpstreamTaskID: "origin-private"}}
 	require.NoError(t, db.Create(&origin).Error)
 	now := model.GetDBTimestamp()
-	subscription := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeXCode, Source: "admin", Status: "active", StartTime: now - 1, EndTime: now + 3600, AmountTotal: 10000, QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
+	subscription := model.UserSubscription{UserId: user.Id, UsageScope: model.SubscriptionUsageScopeZen, Source: "admin", Status: "active", StartTime: now - 1, EndTime: now + 3600, AmountTotal: 10000, QuotaResetPeriodSnapshot: model.SubscriptionResetNever}
 	require.NoError(t, db.Create(&subscription).Error)
-	require.NoError(t, db.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: subscription.Id, Revision: 1}).Error)
+	require.NoError(t, db.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: subscription.Id, Revision: 1}).Error)
 
 	for _, tc := range []struct {
 		name       string
@@ -390,11 +390,11 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 			common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
 			common.SetContextKey(c, constant.ContextKeyUserSetting, kitdto.UserSetting{BillingPreference: "wallet_only"})
 			if tc.managed {
-				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
-				common.SetContextKey(c, constant.ContextKeyFundingScope, model.SubscriptionUsageScopeXCode)
+				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
+				common.SetContextKey(c, constant.ContextKeyFundingScope, model.SubscriptionUsageScopeZen)
 				common.SetContextKey(c, constant.ContextKeyFundingSubscriptionID, subscription.Id)
 				common.SetContextKey(c, constant.ContextKeyFundingAuthorizationRevision, int64(1))
-				service.GetChannelConstraints(c).AddFilter(dto.ChannelFilter{Kind: dto.FilterXCodeAuthority, Group: "default", Model: pinned.Model, RequestPath: "/v1/responses"})
+				service.GetChannelConstraints(c).AddFilter(dto.ChannelFilter{Kind: dto.FilterZenAuthority, Group: "default", Model: pinned.Model, RequestPath: "/v1/responses"})
 			}
 			c.Set(pluginruntime.ContextKeyPinnedEndpoint, pinned)
 			c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: generation, Plugin: pinned.Plugin})
