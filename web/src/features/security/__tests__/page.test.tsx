@@ -68,9 +68,7 @@ beforeEach(() => {
     removeItem: () => undefined,
   })
   vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
-  useAuthStore
-    .getState()
-    .auth.setUser({ ...profile, permissions: { sidebar_settings: false } })
+  useAuthStore.getState().auth.setUser(profile)
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/user/access_tokens') {
       return { data: { success: true, data: { items: [], legacy: null } } }
@@ -254,6 +252,9 @@ describe('security page migration', () => {
       screen.queryByRole('button', { name: 'Change Password' })
     ).not.toBeInTheDocument()
     expect(screen.queryByText('Account Bindings')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Sidebar Personal Settings')
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('switch', { name: 'Record IP Address' })
     ).not.toBeInTheDocument()

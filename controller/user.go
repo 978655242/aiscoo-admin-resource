@@ -476,9 +476,7 @@ func GetSelf(c *gin.Context) {
 	// The authenticated role is loaded from GetUserCache. It should equal the
 	// row role, but use it for capabilities so GetSelf and login/refresh remain
 	// consistent with the authorization decision made for this request.
-	permissions := calculateUserPermissions(userRole)
-	permissions["admin_permissions"] = authz.Capabilities(id, userRole)
-	responseData["permissions"] = permissions
+	responseData["permissions"] = map[string]any{"admin_permissions": authz.Capabilities(id, userRole)}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -492,9 +490,6 @@ func GetSelf(c *gin.Context) {
 // login and refresh. It intentionally excludes password, management PAT and
 // administrator-only remarks.
 func buildSelfUserData(user *model.User) map[string]any {
-	userSetting := user.GetSetting()
-	permissions := calculateUserPermissions(user.Role)
-	permissions["admin_permissions"] = authz.Capabilities(user.Id, user.Role)
 	return map[string]any{
 		"id":                user.Id,
 		"username":          user.Username,
@@ -521,99 +516,8 @@ func buildSelfUserData(user *model.User) map[string]any {
 		"linux_do_id":       user.LinuxDOId,
 		"setting":           user.Setting,
 		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,
+		"permissions":       map[string]any{"admin_permissions": authz.Capabilities(user.Id, user.Role)},
 	}
-}
-
-// 计算用户权限的辅助函数
-func calculateUserPermissions(userRole int) map[string]any {
-	permissions := map[string]any{}
-
-	// 根据用户角色计算权限
-	if userRole == common.RoleRootUser {
-		// 超级管理员不需要边栏设置功能
-		permissions["sidebar_settings"] = false
-		permissions["sidebar_modules"] = map[string]any{}
-	} else if userRole == common.RoleAdminUser {
-		// 管理员可以设置边栏，但不包含系统设置功能
-		permissions["sidebar_settings"] = true
-		permissions["sidebar_modules"] = map[string]any{
-			"admin": map[string]any{
-				"setting": false, // 管理员不能访问系统设置
-			},
-		}
-	} else {
-		// 普通用户只能设置个人功能，不包含管理员区域
-		permissions["sidebar_settings"] = true
-		permissions["sidebar_modules"] = map[string]any{
-			"admin": false, // 普通用户不能访问管理员区域
-		}
-	}
-
-	return permissions
-}
-
-// 根据用户角色生成默认的边栏配置
-func generateDefaultSidebarConfig(userRole int) string {
-	defaultConfig := map[string]any{}
-
-	// 聊天区域 - 所有用户都可以访问
-	defaultConfig["chat"] = map[string]any{
-		"enabled":    true,
-		"playground": true,
-		"chat":       true,
-	}
-
-	// 控制台区域 - 所有用户都可以访问
-	defaultConfig["console"] = map[string]any{
-		"enabled":    true,
-		"detail":     true,
-		"token":      true,
-		"log":        true,
-		"midjourney": true,
-		"task":       true,
-	}
-
-	// 个人中心区域 - 所有用户都可以访问
-	defaultConfig["personal"] = map[string]any{
-		"enabled":  true,
-		"topup":    true,
-		"personal": true,
-	}
-
-	// 管理员区域 - 根据角色决定
-	if userRole == common.RoleAdminUser {
-		// 管理员可以访问管理员区域，但不能访问系统设置
-		defaultConfig["admin"] = map[string]any{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    false, // 管理员不能访问系统设置
-		}
-	} else if userRole == common.RoleRootUser {
-		// 超级管理员可以访问所有功能
-		defaultConfig["admin"] = map[string]any{
-			"enabled":    true,
-			"channel":    true,
-			"models":     true,
-			"redemption": true,
-			"user":       true,
-			"setting":    true,
-		}
-	}
-	// 普通用户不包含admin区域
-
-	// 转换为JSON字符串
-	configBytes, err := common.Marshal(defaultConfig)
-	if err != nil {
-		common.SysLog(common.LogText("failed to generate the default sidebar config: %s", err.Error()))
-		return ""
-	}
-
-	return string(configBytes)
 }
 
 func GetUserModels(c *gin.Context) {
@@ -797,32 +701,6 @@ func UpdateSelf(c *gin.Context) {
 			recordUserSecurityAudit(c, c.GetInt("id"), "user.password_change", map[string]any{"success": succeeded, "notification_failed": notificationFailed})
 		}()
 	}
-	// 检查是否是用户设置更新请求 (sidebar_modules 或 language)
-	if sidebarModules, sidebarExists := requestData["sidebar_modules"]; sidebarExists && !passwordRequested {
-		userId := c.GetInt("id")
-		user, err := model.GetUserById(userId, false)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-
-		// 获取当前用户设置
-		currentSetting := user.GetSetting()
-
-		// 更新sidebar_modules字段
-		if sidebarModulesStr, ok := sidebarModules.(string); ok {
-			currentSetting.SidebarModules = sidebarModulesStr
-		}
-
-		if err := model.UpdateUserSetting(user.Id, currentSetting); err != nil {
-			common.ApiErrorT(c, "Update failed")
-			return
-		}
-
-		common.ApiSuccessT(c, "Update successful", nil)
-		return
-	}
-
 	// 检查是否是语言偏好更新请求
 	if language, langExists := requestData["language"]; langExists && !passwordRequested {
 		userId := c.GetInt("id")

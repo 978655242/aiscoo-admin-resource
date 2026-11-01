@@ -451,6 +451,12 @@ func TestSecurityAccountProfileReadsPasswordStatusInOneQuery(t *testing.T) {
 			assert.NotContains(t, result.Data, "password")
 			assert.NotContains(t, result.Data, "access_token")
 			assert.NotContains(t, result.Data, "remark")
+			assert.NotContains(t, result.Data, "sidebar_modules")
+			permissions, ok := result.Data["permissions"].(map[string]any)
+			require.True(t, ok)
+			assert.Contains(t, permissions, "admin_permissions")
+			assert.NotContains(t, permissions, "sidebar_settings")
+			assert.NotContains(t, permissions, "sidebar_modules")
 
 			bundle, err := service.CreateLoginSession(user.Id, "profile-test", "127.0.0.1", "profile-test")
 			require.NoError(t, err)
@@ -473,6 +479,31 @@ func TestSecurityAccountProfileUpdateDoesNotRequireProof(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", stored.DisplayName)
 	assert.Equal(t, user.Password, stored.Password)
+}
+
+// The personal sidebar setting was removed. A client that still sends it gets
+// a success without any stored change, and a value saved earlier leaves the
+// stored settings the next time they are written.
+func TestSecurityAccountIgnoresRemovedSidebarModules(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	legacySetting := `{"language":"zh","sidebar_modules":"{\"chat\":{\"enabled\":false}}"}`
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("setting", legacySetting).Error)
+
+	response := securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"sidebar_modules":"{\"console\":{\"enabled\":false}}"}`, "", identity, UpdateSelf)
+	var result securityEnrollmentResponse
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	stored, err := model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.Equal(t, legacySetting, stored.Setting)
+
+	response = securityEnrollmentRequest(http.MethodPut, "/api/user/self", `{"language":"en"}`, "", identity, UpdateSelf)
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	stored, err = model.GetUserById(user.Id, true)
+	require.NoError(t, err)
+	assert.Equal(t, "en", stored.GetSetting().Language)
+	assert.NotContains(t, stored.Setting, "sidebar_modules")
 }
 
 func TestSecurityAccountLongUnicodePasswordAndSessionRotation(t *testing.T) {

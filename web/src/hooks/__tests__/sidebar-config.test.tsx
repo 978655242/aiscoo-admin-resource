@@ -45,7 +45,7 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
-function sidebarFor(admin?: object, user?: object, canConfigure = true) {
+function sidebarFor(admin?: object) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -56,8 +56,6 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
     id: 1,
     username: 'alice',
     role: 1,
-    permissions: { sidebar_settings: canConfigure },
-    sidebar_modules: user ? JSON.stringify(user) : '',
   })
   function Wrapper(props: { children: ReactNode }) {
     return (
@@ -75,10 +73,9 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 
 describe('security sidebar visibility', () => {
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
-    const { result } = sidebarFor(
-      { personal: { enabled: true, personal: true, topup: true } },
-      { personal: { enabled: true, personal: true } }
-    )
+    const { result } = sidebarFor({
+      personal: { enabled: true, personal: true, topup: true },
+    })
     expect(
       result.current
         .find((group) => group.id === 'personal')
@@ -91,32 +88,15 @@ describe('security sidebar visibility', () => {
     ).toBe(true)
   })
   it.each([
-    [{ personal: { enabled: true, security: false } }, undefined],
-    [{ personal: { enabled: false } }, { personal: { security: true } }],
-    [undefined, { personal: { enabled: true, security: false } }],
-    [undefined, { personal: { enabled: false } }],
-  ])(
-    'admin or user disablement hides Security & Access (%j, %j)',
-    (admin, user) => {
-      const { result } = sidebarFor(admin, user)
-      expect(
-        result.current
-          .flatMap((group) => group.items)
-          .some((item) => item.title === 'Security & Access')
-      ).toBe(false)
-    }
-  )
-  it('users without sidebar configuration permission retain the admin view', () => {
-    const { result } = sidebarFor(
-      undefined,
-      { personal: { security: false } },
-      false
-    )
+    { personal: { enabled: true, security: false } },
+    { personal: { enabled: false } },
+  ])('admin disablement hides Security & Access (%j)', (admin) => {
+    const { result } = sidebarFor(admin)
     expect(
       result.current
         .flatMap((group) => group.items)
         .some((item) => item.title === 'Security & Access')
-    ).toBe(true)
+    ).toBe(false)
   })
 })
 
@@ -137,10 +117,7 @@ describe('audit log sidebar entry', () => {
   })
 
   it('legacy configurations show a separate Audit Logs link immediately after Usage Logs', () => {
-    const { result } = sidebarFor(
-      { console: { enabled: true, log: true } },
-      { console: { enabled: true, log: true } }
-    )
+    const { result } = sidebarFor({ console: { enabled: true, log: true } })
     const items =
       result.current.find((group) => group.id === 'general')?.items ?? []
     const usageIndex = items.findIndex((item) => item.title === 'Usage Logs')
@@ -155,21 +132,16 @@ describe('audit log sidebar entry', () => {
   })
 
   it.each([
-    [{ console: { enabled: true, audit: false } }, undefined],
-    [{ console: { enabled: false } }, { console: { audit: true } }],
-    [undefined, { console: { enabled: true, audit: false } }],
-    [undefined, { console: { enabled: false } }],
-  ])(
-    'admin and personal visibility rules can hide Audit Logs (%j, %j)',
-    (admin, user) => {
-      const { result } = sidebarFor(admin, user)
-      expect(
-        result.current
-          .flatMap((group) => group.items)
-          .some((item) => item.title === 'Audit Logs')
-      ).toBe(false)
-    }
-  )
+    { console: { enabled: true, audit: false } },
+    { console: { enabled: false } },
+  ])('admin visibility rules can hide Audit Logs (%j)', (admin) => {
+    const { result } = sidebarFor(admin)
+    expect(
+      result.current
+        .flatMap((group) => group.items)
+        .some((item) => item.title === 'Audit Logs')
+    ).toBe(false)
+  })
 
   it('hiding Usage Logs does not hide the independently configured Audit Logs entry', () => {
     const { result } = sidebarFor({ console: { enabled: true, log: false } })
@@ -178,5 +150,24 @@ describe('audit log sidebar entry', () => {
       .map((item) => item.title)
     expect(titles).not.toContain('Usage Logs')
     expect(titles).toContain('Audit Logs')
+  })
+})
+
+describe('chat sidebar group', () => {
+  it('legacy configurations that enable chat presets show only Playground', () => {
+    const legacy = { chat: { enabled: true, playground: true, chat: true } }
+    const { result } = sidebarFor(legacy)
+    expect(
+      result.current
+        .find((group) => group.id === 'chat')
+        ?.items.map((item) => item.title)
+    ).toEqual(['Playground'])
+  })
+
+  it('admin settings drop the removed chat presets toggle from legacy configurations', () => {
+    const config = parseSidebarModulesAdmin(
+      '{"chat":{"enabled":true,"playground":false,"chat":true}}'
+    )
+    expect(config.chat).toEqual({ enabled: true, playground: false })
   })
 })
