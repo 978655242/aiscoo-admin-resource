@@ -50,13 +50,12 @@ export function ProfileSettingsCard({
   if (loading) {
     return (
       <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-        <CardHeader className='border-b p-3 !pb-3 sm:p-5 sm:!pb-5'>
-          <Skeleton className='h-6 w-32' />
-          <Skeleton className='mt-2 h-4 w-48' />
+        <CardHeader className='border-b p-4 !pb-3'>
+          <Skeleton className='h-5 w-32' />
         </CardHeader>
-        <CardContent className='space-y-4 p-3 sm:p-5'>
+        <CardContent className='space-y-4 p-4'>
           {['notifications', 'threshold', 'preferences'].map((key) => (
-            <Skeleton key={key} className='h-20 w-full' />
+            <Skeleton key={key} className='h-12 w-full' />
           ))}
         </CardContent>
       </Card>
@@ -65,11 +64,15 @@ export function ProfileSettingsCard({
 
   return (
     <TitledCard
-      title={t('Settings')}
-      description={t('Settings & Preferences')}
-      icon={<Settings className='h-4 w-4' />}
+      title={t('Settings & Preferences')}
+      icon={<Settings className='size-4' />}
       iconTone='info'
       disableHoverEffect
+      className='min-w-0 shadow-none'
+      headerClassName='p-4 !pb-3 sm:p-4 sm:!pb-3'
+      contentClassName='p-4 sm:p-4'
+      titleClassName='text-sm sm:text-sm'
+      iconClassName='size-7 sm:size-7'
     >
       <NotificationTab
         profile={profile}

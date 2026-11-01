@@ -80,7 +80,7 @@ describe('security sidebar visibility', () => {
       result.current
         .find((group) => group.id === 'personal')
         ?.items.map((item) => item.title)
-    ).toEqual(['Wallet', 'Profile', 'Security & Access'])
+    ).toEqual(['Wallet', 'Profile', 'Security & Access', 'Audit Logs'])
     expect(
       result.current
         .flatMap((group) => group.items)
@@ -116,20 +116,25 @@ describe('audit log sidebar entry', () => {
     expect(titles).toContain('Usage Logs')
   })
 
-  it('legacy configurations show a separate Audit Logs link immediately after Usage Logs', () => {
-    const { result } = sidebarFor({ console: { enabled: true, log: true } })
-    const items =
-      result.current.find((group) => group.id === 'general')?.items ?? []
-    const usageIndex = items.findIndex((item) => item.title === 'Usage Logs')
-    expect(items[usageIndex + 1]).toMatchObject({
-      title: 'Audit Logs',
-      url: '/usage-logs/audit',
-    })
-    const selected = items.filter((item) =>
-      checkIsActive('/usage-logs/audit', item)
-    )
-    expect(selected.map((item) => item.title)).toEqual(['Audit Logs'])
-  })
+  it.each([undefined, { console: { enabled: true, log: true } }])(
+    'default and legacy configurations show Audit Logs under Personal (%j)',
+    (admin) => {
+      const { result } = sidebarFor(admin)
+      const personalItems =
+        result.current.find((group) => group.id === 'personal')?.items ?? []
+      expect(personalItems.at(-1)).toMatchObject({
+        title: 'Audit Logs',
+        url: '/usage-logs/audit',
+      })
+      const generalItems =
+        result.current.find((group) => group.id === 'general')?.items ?? []
+      expect(generalItems.map((item) => item.title)).not.toContain('Audit Logs')
+      const selected = result.current
+        .flatMap((group) => group.items)
+        .filter((item) => checkIsActive('/usage-logs/audit', item))
+      expect(selected.map((item) => item.title)).toEqual(['Audit Logs'])
+    }
+  )
 
   it.each([
     { console: { enabled: true, audit: false } },

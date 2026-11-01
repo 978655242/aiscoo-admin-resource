@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Combobox } from '@/components/ui/combobox'
+import { Label } from '@/components/ui/label'
 import { TitledCard } from '@/components/ui/titled-card'
 import {
   INTERFACE_LANGUAGE_OPTIONS,
@@ -100,22 +101,23 @@ export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
   return (
     <TitledCard
       title={t('Language Preferences')}
-      description={t('Set the language used across the interface')}
-      icon={<Languages className='h-4 w-4' />}
+      icon={<Languages className='size-4' />}
       iconTone='chart-4'
       disableHoverEffect
+      className='shadow-none'
+      headerClassName='p-4 !pb-3 sm:p-4 sm:!pb-3'
+      contentClassName='space-y-3 p-4 sm:p-4'
+      titleClassName='text-sm sm:text-sm'
+      iconClassName='size-7 sm:size-7'
     >
-      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4'>
-        <div className='space-y-1'>
-          <div className='text-sm font-medium'>{t('Interface Language')}</div>
-          <p className='text-muted-foreground line-clamp-2 text-xs sm:text-sm'>
-            {t(
-              'Language preferences sync across your signed-in devices and affect API error messages.'
-            )}
-          </p>
-        </div>
-        <div className='flex items-center gap-2 sm:min-w-48'>
+      <div className='space-y-3'>
+        <Label htmlFor='profile-language' className='text-xs'>
+          {t('Interface Language')}
+        </Label>
+        <div className='flex min-w-0 items-center gap-2'>
           <Combobox
+            id='profile-language'
+            aria-label={t('Interface Language')}
             options={INTERFACE_LANGUAGE_OPTIONS.map((language) => ({
               value: language.code,
               label: language.label,
@@ -123,13 +125,21 @@ export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
             value={currentLanguage}
             onValueChange={handleLanguageChange}
             disabled={saving}
-            className='w-full sm:w-48'
+            className='w-full min-w-0'
             placeholder={t('Select language')}
           />
           {saving && (
-            <Loader2 className='text-muted-foreground size-4 animate-spin' />
+            <Loader2
+              aria-hidden='true'
+              className='text-muted-foreground size-4 shrink-0 animate-spin'
+            />
           )}
         </div>
+        <p className='text-muted-foreground text-xs leading-relaxed'>
+          {t(
+            'Language preferences sync across your signed-in devices and affect API error messages.'
+          )}
+        </p>
       </div>
     </TitledCard>
   )
