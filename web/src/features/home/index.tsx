@@ -60,7 +60,7 @@ export function Home() {
 
   if (!isLoaded) {
     return (
-      <PublicLayout showMainContainer={false}>
+      <PublicLayout showMainContainer={false} className='home-canvas'>
         <main className='flex min-h-screen items-center justify-center'>
           <div className='text-muted-foreground'>{t('Loading...')}</div>
         </main>
@@ -121,7 +121,7 @@ export function Home() {
   }
 
   return (
-    <PublicLayout showMainContainer={false}>
+    <PublicLayout showMainContainer={false} className='home-canvas'>
       <Hero isAuthenticated={isAuthenticated} />
       <Stats />
       <Features />

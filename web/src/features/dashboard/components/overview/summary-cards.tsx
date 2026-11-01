@@ -288,7 +288,7 @@ export function SummaryCards() {
           </StaggerContainer>
         </div>
 
-        <div className='flex flex-col justify-between gap-3 border-t bg-[linear-gradient(135deg,#eaf3f1_0%,#f2f8f7_55%,#f8fbfb_100%)] p-3 sm:gap-4 sm:p-5 xl:border-t-0 xl:border-l'>
+        <div className='flex flex-col justify-between gap-3 border-t bg-[linear-gradient(135deg,#e9eff3_0%,#f1f5f8_55%,#f8fafb_100%)] p-3 sm:gap-4 sm:p-5 xl:border-t-0 xl:border-l'>
           <div className='flex flex-col gap-2 sm:gap-3'>
             <div className='flex items-center justify-between'>
               <span className='text-muted-foreground text-xs font-medium'>

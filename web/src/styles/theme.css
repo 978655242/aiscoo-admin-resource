@@ -95,10 +95,11 @@ For commercial licensing, please contact support@quantumnous.com
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --font-body: var(--font-ui-sans);
 
-  /* Official-site palette (aiscoo-officialsite): mint canvas, white cards,
-   * deep-teal primary. The night palette lives in `.dark` below and is only
+  /* Official-site palette (aiscoo-officialsite) on a cool-white canvas:
+   * white cards, deep-teal primary. The home page keeps the official mint
+   * canvas through `.home-canvas` below; the night palette in `.dark` is only
    * applied to the top bar. */
-  --background: #eff9f7;
+  --background: #f5f8fa;
   --foreground: #153640;
   --card: #ffffff;
   --card-foreground: #153640;
@@ -106,11 +107,11 @@ For commercial licensing, please contact support@quantumnous.com
   --popover-foreground: #153640;
   --primary: #14414b;
   --primary-foreground: #b9f9f8;
-  --secondary: #d5efed;
+  --secondary: #e9eff2;
   --secondary-foreground: #14414b;
-  --muted: #eaf6f4;
+  --muted: #eef3f6;
   --muted-foreground: #4a6870;
-  --accent: #d5efed;
+  --accent: #e9eff2;
   --accent-foreground: #153640;
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
@@ -122,8 +123,8 @@ For commercial licensing, please contact support@quantumnous.com
   --info-foreground: oklch(0.985 0 0);
   --neutral: #6f8b94;
   --neutral-foreground: oklch(0.145 0 0);
-  --border: #d3e5e3;
-  --input: #cfe1df;
+  --border: #e1e7eb;
+  --input: #d9e1e6;
   --ring: #137484;
   --chart-1: #1b6f86;
   --chart-2: #3a6ed8;
@@ -133,62 +134,44 @@ For commercial licensing, please contact support@quantumnous.com
   --overview-accent-1: #1b6f86;
   --overview-accent-2: #3a6ed8;
   --overview-accent-3: #8b5cf6;
-  --sidebar: #eff9f7;
+  --sidebar: #f5f8fa;
   --sidebar-foreground: #153640;
   --sidebar-primary: #14414b;
   --sidebar-primary-foreground: #b9f9f8;
   --sidebar-accent: #14414b;
   --sidebar-accent-foreground: #b9f9f8;
-  --sidebar-border: #d3e5e3;
+  --sidebar-border: #e1e7eb;
   --sidebar-ring: #137484;
-  --skeleton-base: #dcebe9;
-  --skeleton-highlight: #eaf5f3;
+  --skeleton-base: #e7edf0;
+  --skeleton-highlight: #f1f5f7;
   --table-row: var(--background);
-  --table-header: color-mix(in oklch, var(--foreground) 3%, var(--background));
-  --table-header-hover: color-mix(
-    in oklch,
-    var(--foreground) 5%,
-    var(--background)
-  );
+  --table-header: #eef3f6;
+  --table-header-hover: #e6edf1;
   /* Disabled rows: kept subtle so they read as "quiet", not as a colored
      alert state. */
-  --table-disabled: color-mix(
-    in oklch,
-    var(--foreground) 4%,
-    var(--background)
-  );
-  --table-disabled-hover: color-mix(
-    in oklch,
-    var(--foreground) 6%,
-    var(--background)
-  );
-  --table-disabled-border: color-mix(
-    in oklch,
-    var(--foreground) 18%,
-    var(--background)
-  );
+  --table-disabled: #f1f4f6;
+  --table-disabled-hover: #eaeff2;
+  --table-disabled-border: #c9d3d9;
 }
 
-/* Console only: the pages with the sidebar have many menus and dense tables,
- * so the mint canvas is much paler than on the home and public pages. The
- * selector matches the sidebar wrapper, so portaled dialogs and menus (which
- * live under <body>) get the same surfaces. */
+/* Console (pages with the sidebar): the cool-white canvas frames the page
+ * through `--sidebar`, and the content panel is white. Keeping the panel on
+ * `--background` lets pinned table columns and the page footer match it. The
+ * selector matches the sidebar wrapper, so portaled dialogs and menus under
+ * <body> get the same surfaces. */
 body:has([data-slot='sidebar-wrapper']) {
-  --background: #f6faf9;
-  --sidebar: #f6faf9;
-  --muted: #eff5f4;
-  --secondary: #e6f0ee;
-  --accent: #e6f0ee;
-  --border: #dde9e7;
-  --input: #d8e5e3;
-  --sidebar-border: #dde9e7;
-  --skeleton-base: #e8f0ef;
-  --skeleton-highlight: #f2f7f6;
-  --table-header: #eaf2f0;
-  --table-header-hover: #e2ecea;
-  --table-disabled: #f0f4f4;
-  --table-disabled-hover: #e9efef;
-  --table-disabled-border: #c8d5d3;
+  --background: #ffffff;
+  --table-row: var(--background);
+}
+
+/* Home page only: keeps the official site's mint canvas. */
+.home-canvas {
+  --background: #eff9f7;
+  --secondary: #d5efed;
+  --muted: #eaf6f4;
+  --accent: #d5efed;
+  --border: #d3e5e3;
+  --input: #cfe1df;
 }
 
 /* Night palette from the official site header. Only the top bar carries the
