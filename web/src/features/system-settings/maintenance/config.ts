@@ -55,7 +55,6 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   chat: {
     enabled: true,
     playground: true,
-    chat: true,
   },
   console: {
     enabled: true,
@@ -205,6 +204,8 @@ export function parseSidebarModulesAdmin(
       Object.entries(raw as Record<string, unknown>).forEach(
         ([moduleKey, moduleValue]) => {
           if (moduleKey === 'enabled') return
+          // The chat presets menu was removed; drop its stale toggle.
+          if (sectionKey === 'chat' && moduleKey === 'chat') return
           sectionConfig[moduleKey] = toBoolean(
             moduleValue,
             defaultSection[moduleKey] ?? true

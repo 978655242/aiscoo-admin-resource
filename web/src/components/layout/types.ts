@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type LinkProps } from '@tanstack/react-router'
-import { type TFunction } from 'i18next'
+import type { LinkProps } from '@tanstack/react-router'
+import type { TFunction } from 'i18next'
 
 /**
  * Base navigation item type
@@ -42,7 +42,6 @@ type BaseNavItem = {
 export type NavLink = BaseNavItem & {
   url: LinkProps['to'] | (string & {})
   items?: never
-  type?: never
 }
 
 /**
@@ -51,22 +50,12 @@ export type NavLink = BaseNavItem & {
 export type NavCollapsible = BaseNavItem & {
   items: (BaseNavItem & { url: LinkProps['to'] | (string & {}) })[]
   url?: never
-  type?: never
-}
-
-/**
- * Dynamic chat presets type - dynamically loaded chat preset list from API
- */
-export type NavChatPresets = BaseNavItem & {
-  type: 'chat-presets'
-  url?: never
-  items?: never
 }
 
 /**
  * Navigation item union type
  */
-export type NavItem = NavCollapsible | NavLink | NavChatPresets
+export type NavItem = NavCollapsible | NavLink
 
 /**
  * Navigation group type - a group of navigation items in sidebar
