@@ -108,22 +108,22 @@ func GetModelMeta(c *gin.Context) {
 func bindModelMetadata(c *gin.Context) (model.Model, *string, error) {
 	var request struct {
 		model.Model
-		XCodeConfig common.RawMessage `json:"xcode_config"`
+		ZenConfig common.RawMessage `json:"xcode_config"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		return model.Model{}, nil, err
 	}
-	if len(request.XCodeConfig) == 0 {
+	if len(request.ZenConfig) == 0 {
 		return request.Model, nil, nil
 	}
-	if common.GetJsonType(request.XCodeConfig) != "string" {
+	if common.GetJsonType(request.ZenConfig) != "string" {
 		return model.Model{}, nil, errors.New("xcode_config must be a JSON string")
 	}
 	var config string
-	if err := common.Unmarshal(request.XCodeConfig, &config); err != nil {
+	if err := common.Unmarshal(request.ZenConfig, &config); err != nil {
 		return model.Model{}, nil, err
 	}
-	request.Model.XCodeConfig = model.LongText(config)
+	request.Model.ZenConfig = model.LongText(config)
 	return request.Model, &config, nil
 }
 
@@ -164,7 +164,7 @@ func CreateModelMeta(c *gin.Context) {
 func UpdateModelMeta(c *gin.Context) {
 	statusOnly := c.Query("status_only") == "true"
 
-	m, xcodeConfig, err := bindModelMetadata(c)
+	m, zenConfig, err := bindModelMetadata(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -202,7 +202,7 @@ func UpdateModelMeta(c *gin.Context) {
 			return
 		}
 
-		if err := m.Update(xcodeConfig); err != nil {
+		if err := m.Update(zenConfig); err != nil {
 			common.ApiError(c, err)
 			return
 		}

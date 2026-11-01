@@ -12,7 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	xcodeDTO "github.com/QuantumNous/new-api/dto"
+	zenDTO "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -25,8 +25,8 @@ import (
 )
 
 func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dto.Request, err error) {
-	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode {
-		if cached, exists := common.GetContextKey(c, constant.ContextKeyXCodeValidatedRequest); exists {
+	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen {
+		if cached, exists := common.GetContextKey(c, constant.ContextKeyZenValidatedRequest); exists {
 			if validated, ok := cached.(dto.Request); ok {
 				return validated, nil
 			}
@@ -69,7 +69,7 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	default:
 		return nil, fmt.Errorf("unsupported relay format: %s", format)
 	}
-	if err != nil || common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeXCode {
+	if err != nil || common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeZen {
 		return request, err
 	}
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
@@ -79,25 +79,25 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case *dto.GeneralOpenAIRequest:
 		modelID = typed.Model
 		if relayMode == relayconstant.RelayModeChatCompletions {
-			validatedGroup, err = service.ValidateXCodeModelRequest(userID, typed.Model, xcodeDTO.XCodeAPITypeOpenAIChatCompletions, typed.MaxTokens, typed.MaxCompletionTokens)
+			validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeOpenAIChatCompletions, typed.MaxTokens, typed.MaxCompletionTokens)
 		} else {
-			err = types.NewErrorWithStatusCode(service.ErrXCodeModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			err = types.NewErrorWithStatusCode(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	case *dto.ClaudeRequest:
 		modelID = typed.Model
-		validatedGroup, err = service.ValidateXCodeModelRequest(userID, typed.Model, xcodeDTO.XCodeAPITypeAnthropicMessages, typed.MaxTokens, typed.MaxTokensToSample)
+		validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeAnthropicMessages, typed.MaxTokens, typed.MaxTokensToSample)
 	case *dto.OpenAIResponsesRequest:
 		modelID = typed.Model
-		validatedGroup, err = service.ValidateXCodeModelRequest(userID, typed.Model, xcodeDTO.XCodeAPITypeOpenAIResponses, typed.MaxOutputTokens)
+		validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeOpenAIResponses, typed.MaxOutputTokens)
 	default:
-		err = types.NewErrorWithStatusCode(service.ErrXCodeModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		err = types.NewErrorWithStatusCode(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if err == nil {
 		common.SetContextKey(c, constant.ContextKeyUserGroup, validatedGroup)
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, validatedGroup)
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, validatedGroup)
-		common.SetContextKey(c, constant.ContextKeyXCodeValidatedRequest, request)
-		service.GetChannelConstraints(c).AddFilter(xcodeDTO.ChannelFilter{Kind: xcodeDTO.FilterXCodeAuthority, Group: validatedGroup, Model: modelID, RequestPath: c.Request.URL.Path})
+		common.SetContextKey(c, constant.ContextKeyZenValidatedRequest, request)
+		service.GetChannelConstraints(c).AddFilter(zenDTO.ChannelFilter{Kind: zenDTO.FilterZenAuthority, Group: validatedGroup, Model: modelID, RequestPath: c.Request.URL.Path})
 	}
 	return request, err
 }

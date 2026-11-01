@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 
-import { XCodeAuthorize } from '@/features/xcode/authorize'
+import { ZenAuthorize } from '@/features/zen/authorize'
 
 export const Route = createFileRoute('/xcode/authorize')({
   validateSearch: z.object({ flow_token: z.string().max(2048).catch('') }),
@@ -29,6 +29,6 @@ export const Route = createFileRoute('/xcode/authorize')({
 function AuthorizeRoute() {
   const search = Route.useSearch()
   return (
-    <XCodeAuthorize key={search.flow_token} flowToken={search.flow_token} />
+    <ZenAuthorize key={search.flow_token} flowToken={search.flow_token} />
   )
 }

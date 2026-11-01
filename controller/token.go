@@ -465,7 +465,7 @@ func UpdateToken(c *gin.Context) {
 			}
 		}
 	}
-	if statusOnly != "" && cleanToken.ClientPurpose == model.ClientPurposeXCode {
+	if statusOnly != "" && cleanToken.ClientPurpose == model.ClientPurposeZen {
 		err = cleanToken.SelectUpdate()
 	} else {
 		err = cleanToken.Update()

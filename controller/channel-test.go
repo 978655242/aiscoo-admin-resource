@@ -16,7 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	xcodeDTO "github.com/QuantumNous/new-api/dto"
+	zenDTO "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -238,7 +238,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			if candidate.ModelName != testModel {
 				continue
 			}
-			config, err := model.ParseXCodeModelMetadata(string(candidate.XCodeConfig))
+			config, err := model.ParseZenModelMetadata(string(candidate.ZenConfig))
 			if err != nil || !config.ModelConfig.Enabled {
 				continue
 			}
@@ -247,11 +247,11 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			if uint64(budget) != output.Max || helper.ExceedsMaxTokensLimit(&budget) {
 				continue
 			}
-			// Only direct canonical maps are supported here; CEL execution belongs to XCode.
+			// Only direct canonical maps are supported here; CEL execution belongs to aiscoo zen.
 			outputMap := strings.TrimSpace(output.Map)
 			switch req := request.(type) {
 			case *dto.GeneralOpenAIRequest:
-				if config.APIType != xcodeDTO.XCodeAPITypeOpenAIChatCompletions {
+				if config.APIType != zenDTO.ZenAPITypeOpenAIChatCompletions {
 					continue
 				}
 				switch outputMap {
@@ -261,12 +261,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 					req.MaxCompletionTokens, req.MaxTokens = &budget, nil
 				}
 			case *dto.ClaudeRequest:
-				if config.APIType == xcodeDTO.XCodeAPITypeAnthropicMessages &&
+				if config.APIType == zenDTO.ZenAPITypeAnthropicMessages &&
 					(outputMap == `{"max_tokens": maxOutputTokens}` || outputMap == `{"max_tokens":maxOutputTokens}`) {
 					req.MaxTokens = &budget
 				}
 			case *dto.OpenAIResponsesRequest:
-				if config.APIType == xcodeDTO.XCodeAPITypeOpenAIResponses &&
+				if config.APIType == zenDTO.ZenAPITypeOpenAIResponses &&
 					(outputMap == `{"max_output_tokens": maxOutputTokens}` || outputMap == `{"max_output_tokens":maxOutputTokens}`) {
 					req.MaxOutputTokens = &budget
 				}

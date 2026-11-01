@@ -58,7 +58,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/verify/methods":             accessTokenAnyRule,
 	"POST /api/verify":                    accessTokenAnyRule,
 
-	// XCode issuance and cleanup never accept native PAT authority.
+	// aiscoo zen issuance and cleanup never accept native PAT authority.
 	"GET /api/xcode/v1/auth/authorize":           accessTokenSessionRule,
 	"GET /api/xcode/v1/auth/authorize/request":   accessTokenSessionRule,
 	"POST /api/xcode/v1/auth/authorize/complete": accessTokenSessionRule,

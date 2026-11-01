@@ -7518,9 +7518,9 @@
     "Billing settlement failed": "課金の精算に失敗しました",
     "aiscoo": "aiscoo",
     "Unified AI API gateway and admin dashboard.": "統合 AI API ゲートウェイと管理ダッシュボード。",
-    "aiscoo client (desktop)": "aiscoo クライアント（デスクトップ版）",
-    "aiscoo client (CLI)": "aiscoo クライアント（CLI）",
-    "aiscoo client-exclusive subscription": "aiscoo クライアント専用サブスクリプション",
-    "aiscoo client-only subscription": "aiscoo クライアント専用サブスクリプション"
+    "aiscoo zen (desktop)": "aiscoo クライアント（デスクトップ版）",
+    "aiscoo zen (CLI)": "aiscoo クライアント（CLI）",
+    "aiscoo zen-exclusive subscription": "aiscoo クライアント専用サブスクリプション",
+    "aiscoo zen-only subscription": "aiscoo クライアント専用サブスクリプション"
   }
 }

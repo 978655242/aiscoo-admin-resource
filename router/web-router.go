@@ -25,7 +25,7 @@ func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.Han
 	router.NoRoute(
 		func(c *gin.Context) {
 			if c.Request.URL.Path == "/xcode/plans" {
-				controller.ConsumeXCodeWebHandoff(c)
+				controller.ConsumeZenWebHandoff(c)
 				if c.Writer.Written() {
 					c.Abort()
 					return

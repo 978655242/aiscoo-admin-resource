@@ -632,7 +632,7 @@ func TestNativePasswordMutationRequiresDashboardSessionPurpose(t *testing.T) {
 	}{
 		{name: "legacy dashboard", allowed: true},
 		{name: "dashboard", purpose: ClientPurposeDashboard, allowed: true},
-		{name: "xcode root", purpose: ClientPurposeXCode},
+		{name: "xcode root", purpose: ClientPurposeZen},
 		{name: "unknown", purpose: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

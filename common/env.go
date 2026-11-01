@@ -40,11 +40,11 @@ func GetEnvOrDefaultBool(env string, defaultValue bool) bool {
 	return b
 }
 
-func XCodeIntegrationEnabled() bool {
+func ZenIntegrationEnabled() bool {
 	return GetEnvOrDefaultBool("XCODE_INTEGRATION_ENABLED", false)
 }
 
-func GetXCodePublicOrigin() (string, error) {
+func GetZenPublicOrigin() (string, error) {
 	raw := strings.TrimSpace(os.Getenv("XCODE_PUBLIC_ORIGIN"))
 	origin, err := url.Parse(raw)
 	if err != nil || origin.Host == "" || origin.User != nil || origin.Opaque != "" ||

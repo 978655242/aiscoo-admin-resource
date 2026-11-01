@@ -134,7 +134,7 @@ export async function logout(expectedSID?: string): Promise<ApiResponse> {
   if (expectedSID !== undefined && !expectedSID.trim()) {
     throw new TypeError('Expected session ID must not be empty')
   }
-  // XCODE: 固定 SID 不追随新账户，fetch omit 同时隔离请求与响应 Cookie。
+  // ZEN: 固定 SID 不追随新账户，fetch omit 同时隔离请求与响应 Cookie。
   return executeLogout(
     {
       getExpectedSID: () =>

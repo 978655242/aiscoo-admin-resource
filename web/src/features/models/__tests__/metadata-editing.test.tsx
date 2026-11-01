@@ -55,7 +55,7 @@ const model = {
   updated_time: 1,
 }
 
-const xcodeConfig = JSON.stringify({
+const zenConfig = JSON.stringify({
   schema_version: 1,
   api_type: 'openai-chat-completions',
   model_config: {
@@ -83,7 +83,7 @@ const xcodeConfig = JSON.stringify({
   },
 })
 
-function renderXCodeEditor(storedConfig = '') {
+function renderZenEditor(storedConfig = '') {
   useAuthStore.getState().auth.setUser({ id: 2, username: 'admin', role: 10 })
   const storedModel = { ...model, xcode_config: storedConfig }
   vi.spyOn(api, 'get').mockImplementation(async (url) => ({
@@ -350,7 +350,7 @@ describe('model pricing entry', () => {
 
 describe('metadata editing', () => {
   it('starts aiscoo configuration empty and saves complete JSON with explicit false values', async () => {
-    const { put, client } = renderXCodeEditor()
+    const { put, client } = renderZenEditor()
     const user = userEvent.setup()
     const area = await screen.findByRole('region', {
       name: 'aiscoo configuration',
@@ -363,22 +363,22 @@ describe('metadata editing', () => {
     await user.click(within(area).getByRole('button', { name: 'JSON Mode' }))
     const editor = within(area).getByRole('textbox')
     expect(editor).toHaveValue('')
-    fireEvent.input(editor, { target: { value: xcodeConfig } })
+    fireEvent.input(editor, { target: { value: zenConfig } })
     await user.click(screen.getByRole('button', { name: 'Save metadata' }))
     await waitFor(() => expect(put).toHaveBeenCalled())
     const payload = put.mock.calls[0][1] as { xcode_config: string }
     expect(typeof payload.xcode_config).toBe('string')
-    expect(JSON.parse(payload.xcode_config)).toEqual(JSON.parse(xcodeConfig))
+    expect(JSON.parse(payload.xcode_config)).toEqual(JSON.parse(zenConfig))
     client.clear()
   })
 
-  it('keeps nested objects and false booleans typed when editing visual XCode rows', async () => {
-    const { put, client } = renderXCodeEditor(xcodeConfig)
+  it('keeps nested objects and false booleans typed when editing visual Zen rows', async () => {
+    const { put, client } = renderZenEditor(zenConfig)
     const user = userEvent.setup()
     const area = await screen.findByRole('region', {
       name: 'aiscoo configuration',
     })
-    const config = JSON.parse(xcodeConfig)
+    const config = JSON.parse(zenConfig)
     const nestedValue = within(area).getByDisplayValue(
       JSON.stringify(config.model_config)
     )
@@ -397,7 +397,7 @@ describe('metadata editing', () => {
   })
 
   it('retains loaded aiscoo configuration when description and official sync preference change', async () => {
-    const { put, client } = renderXCodeEditor(xcodeConfig)
+    const { put, client } = renderZenEditor(zenConfig)
     const user = userEvent.setup()
     const description = await screen.findByLabelText('Description')
     await user.clear(description)
@@ -410,13 +410,13 @@ describe('metadata editing', () => {
     expect(put.mock.calls[0][1]).toMatchObject({
       description: 'Updated description',
       sync_official: 0,
-      xcode_config: xcodeConfig,
+      xcode_config: zenConfig,
     })
     client.clear()
   })
 
-  it('blocks invalid XCode JSON without sending a cleared configuration', async () => {
-    const { put, client } = renderXCodeEditor(xcodeConfig)
+  it('blocks invalid Zen JSON without sending a cleared configuration', async () => {
+    const { put, client } = renderZenEditor(zenConfig)
     const user = userEvent.setup()
     const area = await screen.findByRole('region', {
       name: 'aiscoo configuration',
@@ -432,7 +432,7 @@ describe('metadata editing', () => {
   })
 
   it('sends an empty string only after explicitly clearing aiscoo configuration', async () => {
-    const { put, client } = renderXCodeEditor(xcodeConfig)
+    const { put, client } = renderZenEditor(zenConfig)
     const user = userEvent.setup()
     const area = await screen.findByRole('region', {
       name: 'aiscoo configuration',

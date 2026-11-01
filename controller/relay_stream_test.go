@@ -316,8 +316,8 @@ func TestRelayStreamErrorAfterKeepAlive(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/stream", nil)
 			c.Set(common.RequestIdKey, "stream-request")
 			if tc.managed {
-				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
-				c.Writer = &xcodeNoStoreWriter{ResponseWriter: c.Writer}
+				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
+				c.Writer = &zenNoStoreWriter{ResponseWriter: c.Writer}
 			}
 			helper.SetEventStreamHeaders(c)
 			require.NoError(t, helper.PingData(c))
@@ -347,7 +347,7 @@ func TestRelayStreamErrorAfterKeepAlive(t *testing.T) {
 	}
 }
 
-func TestXCodeAdmissionPreservesNoStoreOnStream(t *testing.T) {
+func TestZenAdmissionPreservesNoStoreOnStream(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		stream  bool
@@ -360,11 +360,11 @@ func TestXCodeAdmissionPreservesNoStoreOnStream(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := gin.New()
 			engine.POST("/v1/messages", func(c *gin.Context) {
-				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
-				common.SetContextKey(c, constant.ContextKeyXCodeValidatedRequest, &dto.ClaudeRequest{})
+				common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
+				common.SetContextKey(c, constant.ContextKeyZenValidatedRequest, &dto.ClaudeRequest{})
 				c.Set(common.RequestIdKey, "managed-stream")
 				c.Next()
-			}, XCodeModelAdmission, func(c *gin.Context) {
+			}, ZenModelAdmission, func(c *gin.Context) {
 				if tc.stream {
 					helper.SetEventStreamHeaders(c)
 					_ = helper.PingData(c)

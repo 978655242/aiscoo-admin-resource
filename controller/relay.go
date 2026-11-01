@@ -69,14 +69,14 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
-// XCodeModelAdmission runs before routing and plugin hooks against the raw request.
-func XCodeModelAdmission(c *gin.Context) {
-	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeXCode {
+// ZenModelAdmission runs before routing and plugin hooks against the raw request.
+func ZenModelAdmission(c *gin.Context) {
+	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeZen {
 		c.Next()
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.Writer = &xcodeNoStoreWriter{ResponseWriter: c.Writer}
+	c.Writer = &zenNoStoreWriter{ResponseWriter: c.Writer}
 	if c.Request.Method != http.MethodPost {
 		c.Next()
 		return
@@ -101,34 +101,34 @@ func XCodeModelAdmission(c *gin.Context) {
 	c.Next()
 }
 
-// xcodeNoStoreWriter keeps the XCode cache policy when streaming code sets its headers.
-type xcodeNoStoreWriter struct {
+// xcodeNoStoreWriter keeps the aiscoo zen cache policy when streaming code sets its headers.
+type zenNoStoreWriter struct {
 	gin.ResponseWriter
 }
 
-func (w *xcodeNoStoreWriter) Write(data []byte) (int, error) {
+func (w *zenNoStoreWriter) Write(data []byte) (int, error) {
 	w.WriteHeaderNow()
 	return w.ResponseWriter.Write(data)
 }
 
-func (w *xcodeNoStoreWriter) WriteString(data string) (int, error) {
+func (w *zenNoStoreWriter) WriteString(data string) (int, error) {
 	w.WriteHeaderNow()
 	return w.ResponseWriter.WriteString(data)
 }
 
-func (w *xcodeNoStoreWriter) WriteHeaderNow() {
+func (w *zenNoStoreWriter) WriteHeaderNow() {
 	if !w.ResponseWriter.Written() {
 		w.Header().Set("Cache-Control", "no-store")
 	}
 	w.ResponseWriter.WriteHeaderNow()
 }
 
-func (w *xcodeNoStoreWriter) Flush() {
+func (w *zenNoStoreWriter) Flush() {
 	w.WriteHeaderNow()
 	w.ResponseWriter.Flush()
 }
 
-func (w *xcodeNoStoreWriter) Unwrap() http.ResponseWriter {
+func (w *zenNoStoreWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
@@ -138,7 +138,7 @@ func relayValidationError(c *gin.Context, err error) *types.NewAPIError {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
 	}
 	var validationError *types.NewAPIError
-	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode &&
+	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen &&
 		errors.As(err, &validationError) && strings.HasPrefix(string(validationError.GetErrorCode()), "XCODE_") {
 		return validationError
 	}
@@ -150,22 +150,22 @@ func writeRelayError(c *gin.Context, format types.RelayFormat, apiError *types.N
 	logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(apiError.Error())))
 	message := apiError.Error()
 	switch {
-	case errors.Is(apiError, service.ErrXCodeBackendUnavailable):
+	case errors.Is(apiError, service.ErrZenBackendUnavailable):
 		message = i18n.T(c, i18n.MsgClientBackendUnavailable)
-	case errors.Is(apiError, model.ErrXCodePlanUnassigned):
+	case errors.Is(apiError, model.ErrZenPlanUnassigned):
 		message = i18n.T(c, i18n.MsgClientPlanUnassigned)
-	case errors.Is(apiError, model.ErrXCodePlanExpired):
+	case errors.Is(apiError, model.ErrZenPlanExpired):
 		message = i18n.T(c, i18n.MsgClientPlanExpired)
-	case errors.Is(apiError, model.ErrXCodePlanRevoked):
+	case errors.Is(apiError, model.ErrZenPlanRevoked):
 		message = i18n.T(c, i18n.MsgClientPlanRevoked)
-	case errors.Is(apiError, model.ErrXCodeAuthorizationConflict):
+	case errors.Is(apiError, model.ErrZenAuthorizationConflict):
 		message = i18n.T(c, i18n.MsgClientAuthorizationChanged)
-	case errors.Is(apiError, service.ErrXCodeModelUnavailable):
+	case errors.Is(apiError, service.ErrZenModelUnavailable):
 		message = i18n.T(c, i18n.MsgClientModelUnavailable)
 	}
 	apiError.SetMessage(common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)))
 	upstreamURLs := common.UpstreamAddresses(c)
-	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode
+	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
 	if format != types.RelayFormatOpenAIRealtime && c.Writer.Written() &&
 		strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
 		writeRelayStreamError(c, format, apiError)
@@ -187,10 +187,10 @@ func writeRelayError(c *gin.Context, format types.RelayFormat, apiError *types.N
 	}
 }
 
-// relayClaudeErrorBody preserves Claude error types and XCode admission codes in JSON and SSE.
+// relayClaudeErrorBody preserves Claude error types and aiscoo zen admission codes in JSON and SSE.
 func relayClaudeErrorBody(c *gin.Context, apiError *types.NewAPIError, upstreamURLs []string) any {
 	claudeError := apiError.ToClaudeError(upstreamURLs...)
-	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode
+	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
 	if managed && apiError.GetErrorType() == types.ErrorTypeOpenAIError {
 		claudeError.Type = apiError.ToOpenAIError(upstreamURLs...).Type
 	}
@@ -666,12 +666,12 @@ func executeTaskSubmissionWith(
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
-			managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode
+			managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
 			if managed {
 				constraints := service.GetChannelConstraints(c)
 				pin, found, _ := constraints.ResolvedPin()
 				if found && pin.ChannelId != lockedCh.Id {
-					taskErr = service.TaskErrorWrapperLocal(service.ErrXCodeModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden)
+					taskErr = service.TaskErrorWrapperLocal(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden)
 					taskErr.NoRetry = true
 					break
 				}
@@ -684,9 +684,9 @@ func executeTaskSubmissionWith(
 					constraints.Pins = append(constraints.Pins[:pinIndex], constraints.Pins[pinIndex+1:]...)
 				}
 				if selectErr != nil || selected == nil || selected.Id != lockedCh.Id {
-					taskErr = service.TaskErrorWrapperLocal(service.ErrXCodeModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden)
+					taskErr = service.TaskErrorWrapperLocal(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden)
 					if selectErr != nil && selectErr.Message == "XCODE_BACKEND_UNAVAILABLE" {
-						taskErr = service.TaskErrorWrapperLocal(service.ErrXCodeBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable)
+						taskErr = service.TaskErrorWrapperLocal(service.ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable)
 					} else if selectErr != nil && selectErr.Message == "origin_task_channel_disabled" {
 						taskErr = service.TaskErrorWrapperLocal(errors.New(selectErr.Message), selectErr.Message, http.StatusBadRequest)
 					}

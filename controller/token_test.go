@@ -1058,14 +1058,14 @@ func TestNativeManagedTokenCRUD(t *testing.T) {
 			session := model.UserSession{
 				SID: "managed-native-session", UserID: 7, Version: 1, UserAuthVersion: 1,
 				Status: model.UserSessionStatusActive, RefreshHash: "unused",
-				LoginMethod: "password", ClientPurpose: model.ClientPurposeXCode,
+				LoginMethod: "password", ClientPurpose: model.ClientPurposeZen,
 				CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600,
 			}
 			require.NoError(t, db.Create(&session).Error)
 			token := model.Token{
 				UserId: 7, Key: "managed-native-key", Name: "managed",
 				Status: common.TokenStatusEnabled, UnlimitedQuota: true,
-				ExpiredTime: session.ExpiresAt, ClientPurpose: model.ClientPurposeXCode,
+				ExpiredTime: session.ExpiresAt, ClientPurpose: model.ClientPurposeZen,
 				ClientSessionSID: session.SID,
 			}
 			require.NoError(t, token.Insert())
@@ -1118,7 +1118,7 @@ func TestNativeManagedTokenCRUD(t *testing.T) {
 				assert.Equal(t, model.UserSessionStatusActive, session.Status)
 				require.NoError(t, db.First(&token, token.Id).Error)
 				assert.True(t, token.UnlimitedQuota)
-				assert.Equal(t, model.ClientPurposeXCode, token.ClientPurpose)
+				assert.Equal(t, model.ClientPurposeZen, token.ClientPurpose)
 				assert.Equal(t, session.SID, token.ClientSessionSID)
 				if operation == "rename" {
 					assert.Equal(t, "renamed", token.Name)

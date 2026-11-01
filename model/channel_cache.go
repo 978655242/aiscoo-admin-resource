@@ -122,7 +122,7 @@ func GetRandomSatisfiedChannel(
 ) (*Channel, error) {
 	// Managed authority is live and byte-exact, even while the native cache is warm.
 	for _, filter := range filters {
-		if filter.Kind == dto.FilterXCodeAuthority {
+		if filter.Kind == dto.FilterZenAuthority {
 			return GetChannel(group, model, retry, filters)
 		}
 	}

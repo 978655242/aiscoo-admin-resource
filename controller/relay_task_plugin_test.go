@@ -840,9 +840,9 @@ func TestManagedPinnedChannelDatabaseFailure(t *testing.T) {
 	require.NoError(t, channel.AddAbilities(db))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+	common.SetContextKey(c, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 	constraints := service.GetChannelConstraints(c)
-	constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterXCodeAuthority, Group: "managed", Model: "managed-model", RequestPath: "/v1/responses"})
+	constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterZenAuthority, Group: "managed", Model: "managed-model", RequestPath: "/v1/responses"})
 	constraints.AddPin(dto.ChannelPin{ChannelId: channel.Id, Source: dto.PinSourceOriginTask, Rank: dto.PinRankOriginTask})
 	param := &service.RetryParam{Ctx: c, TokenGroup: "managed", ModelName: "managed-model"}
 
@@ -852,7 +852,7 @@ func TestManagedPinnedChannelDatabaseFailure(t *testing.T) {
 	assert.Equal(t, channel.Id, selected.Id)
 
 	// Inject a query failure only on the direct channel lookup, after the live
-	// XCode authority query has succeeded.
+	// aiscoo zen authority query has succeeded.
 	queryErr := errors.New("isolated test database query failed")
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:managed_pin_database_error", func(tx *gorm.DB) {
 		if tx.Statement.Table == "channels" {

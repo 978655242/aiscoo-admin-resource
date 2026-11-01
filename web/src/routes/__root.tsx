@@ -49,7 +49,7 @@ function RootComponent() {
     select: (state) => state.location.pathname,
   })
   if (pathname === '/xcode/plans') {
-    // XCODE: The embedded page owns its design tokens, not native-admin customization state.
+    // ZEN: The embedded page owns its design tokens, not native-admin customization state.
     return <Outlet />
   }
   return <NativeRootComponent />
@@ -96,7 +96,7 @@ function NativeRootComponent() {
         }
 
         if (currentSID && event.sid === currentSID) {
-          // XCODE: 仅为合法同源授权页保留返回目标，普通后台退出去向保持不变。
+          // ZEN: 仅为合法同源授权页保留返回目标，普通后台退出去向保持不变。
           const currentTarget = sanitizeAuthRedirect(
             window.location.href,
             window.location.origin

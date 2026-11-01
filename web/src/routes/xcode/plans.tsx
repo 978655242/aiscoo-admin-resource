@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
 
-import { XCodePlans } from '@/features/xcode/plans'
+import { ZenPlans } from '@/features/zen/plans'
 
 export const Route = createFileRoute('/xcode/plans')({
-  component: XCodePlans,
+  component: ZenPlans,
 })

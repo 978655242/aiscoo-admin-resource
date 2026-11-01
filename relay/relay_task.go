@@ -333,7 +333,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// Reserve before every attempt. Managed free requests also need a funding fact.
-	managed := info.ClientPurpose == model.ClientPurposeXCode || info.FundingScope == model.SubscriptionUsageScopeXCode
+	managed := info.ClientPurpose == model.ClientPurposeZen || info.FundingScope == model.SubscriptionUsageScopeZen
 	if managed || info.Billing != nil || !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {

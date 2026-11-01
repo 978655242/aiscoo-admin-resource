@@ -210,39 +210,39 @@ func TestAdminResetPlanSubscriptionsNoMatchSucceeds(t *testing.T) {
 	assert.Empty(t, result.AffectedUserIds)
 }
 
-func TestXCodeRequestLedgerRejectsCorruptOccupancyAndPreservesFinalFact(t *testing.T) {
+func TestZenRequestLedgerRejectsCorruptOccupancyAndPreservesFinalFact(t *testing.T) {
 	truncateTables(t)
 	now := GetDBTimestamp()
 	sub := &UserSubscription{
-		Id: 9701, UserId: 701, PlanId: 9799, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9701, UserId: 701, PlanId: 9799, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetNever, AmountTotal: 1000, AmountUsed: 100,
 		StartTime: now - 10, EndTime: now + 3600, Status: "active",
 	}
 	seedSubscriptionResetSub(t, sub)
 	record := &SubscriptionPreConsumeRecord{
 		RequestId: "xcode-corrupt-occupancy", UserId: sub.UserId, UserSubscriptionId: sub.Id,
-		PreConsumed: 100, FundingScope: SubscriptionUsageScopeXCode, ResetGeneration: 1,
+		PreConsumed: 100, FundingScope: SubscriptionUsageScopeZen, ResetGeneration: 1,
 		CycleReservedQuota: 101, Status: "consumed",
 	}
 	seedSubscriptionResetRecord(t, record)
-	require.ErrorIs(t, RefundXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id), ErrSubscriptionRequestConflict)
+	require.ErrorIs(t, RefundZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id), ErrSubscriptionRequestConflict)
 	assert.EqualValues(t, 100, getSubscriptionResetSub(t, sub.Id).AmountUsed)
 	require.NoError(t, DB.Model(record).Update("cycle_reserved_quota", 100).Error)
-	require.NoError(t, SettleXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 150))
-	require.NoError(t, SettleXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 150))
-	require.ErrorIs(t, SettleXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 100), ErrSubscriptionRequestConflict)
-	require.NoError(t, RefundXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id))
+	require.NoError(t, SettleZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 150))
+	require.NoError(t, SettleZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 150))
+	require.ErrorIs(t, SettleZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 100), ErrSubscriptionRequestConflict)
+	require.NoError(t, RefundZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id))
 	assert.EqualValues(t, 150, getSubscriptionResetSub(t, sub.Id).AmountUsed)
 	require.NoError(t, DB.First(record, record.Id).Error)
 	assert.Equal(t, "settled", record.Status)
 	assert.EqualValues(t, 150, record.FinalQuota)
 }
 
-func TestXCodeLazyResetUsesSnapshotWithoutTemplateAndStopsAtExpiry(t *testing.T) {
+func TestZenLazyResetUsesSnapshotWithoutTemplateAndStopsAtExpiry(t *testing.T) {
 	truncateTables(t)
 	now := GetDBTimestamp()
 	sub := &UserSubscription{
-		Id: 9801, UserId: 801, PlanId: 9899, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9801, UserId: 801, PlanId: 9899, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetCustom, QuotaResetCustomSecondsSnapshot: 60,
 		AmountTotal: 1000, AmountUsed: 100, StartTime: now - 90, EndTime: now + 3600,
 		Status: "active", LastResetTime: now - 90, NextResetTime: now - 30,
@@ -250,11 +250,11 @@ func TestXCodeLazyResetUsesSnapshotWithoutTemplateAndStopsAtExpiry(t *testing.T)
 	seedSubscriptionResetSub(t, sub)
 	record := &SubscriptionPreConsumeRecord{
 		RequestId: "xcode-snapshot-no-template", UserId: sub.UserId, UserSubscriptionId: sub.Id,
-		PreConsumed: 100, FundingScope: SubscriptionUsageScopeXCode, ResetGeneration: 1,
+		PreConsumed: 100, FundingScope: SubscriptionUsageScopeZen, ResetGeneration: 1,
 		CycleReservedQuota: 100, Status: "consumed",
 	}
 	seedSubscriptionResetRecord(t, record)
-	require.NoError(t, SettleXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 100))
+	require.NoError(t, SettleZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 100))
 	fresh := getSubscriptionResetSub(t, sub.Id)
 	assert.EqualValues(t, 100, fresh.AmountUsed)
 	assert.EqualValues(t, 2, fresh.QuotaResetGeneration)
@@ -264,34 +264,34 @@ func TestXCodeLazyResetUsesSnapshotWithoutTemplateAndStopsAtExpiry(t *testing.T)
 	}).Error)
 	expired := &SubscriptionPreConsumeRecord{
 		RequestId: "xcode-expired-finalization", UserId: sub.UserId, UserSubscriptionId: sub.Id,
-		PreConsumed: 20, FundingScope: SubscriptionUsageScopeXCode, ResetGeneration: 2,
+		PreConsumed: 20, FundingScope: SubscriptionUsageScopeZen, ResetGeneration: 2,
 		CycleReservedQuota: 20, Status: "consumed",
 	}
 	seedSubscriptionResetRecord(t, expired)
-	require.NoError(t, SettleXCodeSubscriptionRequest(expired.RequestId, sub.UserId, sub.Id, 30))
+	require.NoError(t, SettleZenSubscriptionRequest(expired.RequestId, sub.UserId, sub.Id, 30))
 	fresh = getSubscriptionResetSub(t, sub.Id)
 	assert.EqualValues(t, 110, fresh.AmountUsed)
 	assert.EqualValues(t, 2, fresh.QuotaResetGeneration)
 }
 
-func TestXCodeLegacyDeltaFenceAndCheckedQuota(t *testing.T) {
+func TestZenLegacyDeltaFenceAndCheckedQuota(t *testing.T) {
 	truncateTables(t)
 	now := GetDBTimestamp()
 	sub := &UserSubscription{
-		Id: 9901, UserId: 901, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9901, UserId: 901, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetNever, AmountUsed: math.MaxInt64 - 1,
 		StartTime: now - 10, EndTime: now + 3600, Status: "active",
 	}
 	seedSubscriptionResetSub(t, sub)
 	record := &SubscriptionPreConsumeRecord{
 		RequestId: "xcode-quota-overflow", UserId: sub.UserId, UserSubscriptionId: sub.Id,
-		PreConsumed: 1, FundingScope: SubscriptionUsageScopeXCode, ResetGeneration: 1,
+		PreConsumed: 1, FundingScope: SubscriptionUsageScopeZen, ResetGeneration: 1,
 		CycleReservedQuota: 1, Status: "consumed",
 	}
 	seedSubscriptionResetRecord(t, record)
 	require.ErrorIs(t, PostConsumeUserSubscriptionDelta(sub.Id, 0), ErrSubscriptionFundingTargetInvalid)
 	require.ErrorIs(t, RefundSubscriptionPreConsume(record.RequestId), ErrSubscriptionFundingTargetInvalid)
-	_, err := ReserveXCodeSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 3)
+	_, err := ReserveZenSubscriptionRequest(record.RequestId, sub.UserId, sub.Id, 3)
 	require.ErrorIs(t, err, ErrSubscriptionQuotaInsufficient)
 	assert.EqualValues(t, math.MaxInt64-1, getSubscriptionResetSub(t, sub.Id).AmountUsed)
 	require.NoError(t, DB.Model(sub).Update("usage_scope", "unknown").Error)
@@ -302,11 +302,11 @@ func TestXCodeLegacyDeltaFenceAndCheckedQuota(t *testing.T) {
 	assert.Zero(t, getSubscriptionResetSub(t, sub.Id).AmountUsed)
 }
 
-func TestXCodeAutomaticAndAdminResetKeepImmutablePolicy(t *testing.T) {
+func TestZenAutomaticAndAdminResetKeepImmutablePolicy(t *testing.T) {
 	truncateTables(t)
 	now := GetDBTimestamp()
 	automatic := &UserSubscription{
-		Id: 9911, UserId: 911, PlanId: 9999, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9911, UserId: 911, PlanId: 9999, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetCustom, QuotaResetCustomSecondsSnapshot: 60,
 		AmountTotal: 1000, AmountUsed: 100, StartTime: now - 90, EndTime: now + 3600,
 		Status: "active", LastResetTime: now - 90, NextResetTime: now - 30,
@@ -329,7 +329,7 @@ func TestXCodeAutomaticAndAdminResetKeepImmutablePolicy(t *testing.T) {
 	}
 	seedSubscriptionResetPlan(t, plan)
 	manual := &UserSubscription{
-		Id: 9922, UserId: 922, PlanId: plan.Id, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9922, UserId: 922, PlanId: plan.Id, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetNever, AmountTotal: 1000, AmountUsed: 100,
 		StartTime: now - 10, EndTime: now + 3600, Status: "active",
 	}
@@ -347,11 +347,11 @@ func TestXCodeAutomaticAndAdminResetKeepImmutablePolicy(t *testing.T) {
 	assert.Equal(t, SubscriptionResetNever, fresh.QuotaResetPeriodSnapshot)
 }
 
-func TestXCodeResetPreservesAnchorWhenLifetimeTruncatesNextReset(t *testing.T) {
+func TestZenResetPreservesAnchorWhenLifetimeTruncatesNextReset(t *testing.T) {
 	truncateTables(t)
 	now := GetDBTimestamp()
 	sub := &UserSubscription{
-		Id: 9931, UserId: 931, UsageScope: SubscriptionUsageScopeXCode,
+		Id: 9931, UserId: 931, UsageScope: SubscriptionUsageScopeZen,
 		QuotaResetPeriodSnapshot: SubscriptionResetCustom, QuotaResetCustomSecondsSnapshot: 60,
 		AmountTotal: 1000, AmountUsed: 100, StartTime: now - 20, EndTime: now + 30,
 		Status: "active", LastResetTime: now - 20, NextResetTime: 0,

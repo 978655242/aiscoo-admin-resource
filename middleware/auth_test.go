@@ -159,29 +159,29 @@ func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {
 	assert.Contains(t, response.Body.String(), "AUTH_UNAUTHORIZED")
 }
 
-func TestXCodeControlAndNativeRoutePurposeIsolation(t *testing.T) {
+func TestZenControlAndNativeRoutePurposeIsolation(t *testing.T) {
 	setupDashboardAuthMiddlewareTest(t)
 	user := createMiddlewarePATUser(t, "xcode-root", "opaque-control-pat")
 	require.NoError(t, model.DB.Model(user).Update("role", common.RoleRootUser).Error)
 	bundle, err := service.CreateLoginSession(user.Id, "password", "", "")
 	require.NoError(t, err)
-	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("client_purpose", model.ClientPurposeXCode).Error)
+	require.NoError(t, model.DB.Model(&model.UserSession{}).Where("sid = ?", bundle.Session.SID).Update("client_purpose", model.ClientPurposeZen).Error)
 	session, err := model.GetUserSessionBySID(bundle.Session.SID)
 	require.NoError(t, err)
-	control, _, err := service.IssueXCodeAccessToken(session)
+	control, _, err := service.IssueZenAccessToken(session)
 	require.NoError(t, err)
-	web, _, err := service.IssueXCodeWebToken(session)
+	web, _, err := service.IssueZenWebToken(session)
 	require.NoError(t, err)
 	router := gin.New()
 	handler := func(c *gin.Context) { c.Status(http.StatusNoContent) }
 	for _, path := range []string{"/me", "/plans", "/entitlements", "/models", "/usage", "/client-config"} {
-		router.GET("/api/xcode/v1"+path, XCodeControlAuth(), handler)
+		router.GET("/api/xcode/v1"+path, ZenControlAuth(), handler)
 	}
-	router.POST("/api/xcode/v1/web-handoffs", XCodeControlAuth(), handler)
-	router.POST("/api/xcode/v1/auth/logout", XCodeControlAuth(), handler)
-	router.POST("/api/xcode/v1/admin/users/:id/authorization", XCodeControlAuth(), handler)
-	router.GET("/api/xcode/v1/me/", XCodeControlAuth(), handler)
-	router.POST("/api/xcode/v1/me", XCodeControlAuth(), handler)
+	router.POST("/api/xcode/v1/web-handoffs", ZenControlAuth(), handler)
+	router.POST("/api/xcode/v1/auth/logout", ZenControlAuth(), handler)
+	router.POST("/api/xcode/v1/admin/users/:id/authorization", ZenControlAuth(), handler)
+	router.GET("/api/xcode/v1/me/", ZenControlAuth(), handler)
+	router.POST("/api/xcode/v1/me", ZenControlAuth(), handler)
 	router.GET("/native", RootAuth(), handler)
 	router.GET("/optional", TryUserAuth(), handler)
 	router.GET("/mixed", TokenOrUserAuth(), handler)
@@ -222,12 +222,12 @@ func TestXCodeControlAndNativeRoutePurposeIsolation(t *testing.T) {
 	}
 }
 
-func TestXCodeJWTNeverFallsBackToPATOrRelayKey(t *testing.T) {
+func TestZenJWTNeverFallsBackToPATOrRelayKey(t *testing.T) {
 	setupDashboardAuthMiddlewareTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Token{}))
 	session := &model.UserSession{UserID: 42, SID: "xcode-test-sid", Version: 1, UserAuthVersion: 1,
-		ClientPurpose: model.ClientPurposeXCode, Status: model.UserSessionStatusActive, ExpiresAt: time.Now().Add(time.Minute).Unix()}
-	control, _, err := service.IssueXCodeAccessToken(session)
+		ClientPurpose: model.ClientPurposeZen, Status: model.UserSessionStatusActive, ExpiresAt: time.Now().Add(time.Minute).Unix()}
+	control, _, err := service.IssueZenAccessToken(session)
 	require.NoError(t, err)
 	tampered := tamperDashboardToken(control)
 	malformed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -635,7 +635,7 @@ func TestApplyWebSocketSubprotocolAuthorizationReadsRepeatedHeaders(t *testing.T
 	assert.Equal(t, "Bearer sk-later-field", header.Get("Authorization"))
 }
 
-func setupXCodeAdmissionTest(t *testing.T) (*model.User, *model.Token, *model.UserSession, *model.UserSubscription) {
+func setupZenAdmissionTest(t *testing.T) (*model.User, *model.Token, *model.UserSession, *model.UserSubscription) {
 	t.Helper()
 	require.NoError(t, i18n.Init())
 	setupDashboardAuthMiddlewareTest(t)
@@ -647,34 +647,34 @@ func setupXCodeAdmissionTest(t *testing.T) (*model.User, *model.Token, *model.Us
 	common.IsMasterNode = previousMaster
 	t.Cleanup(func() { common.SetLogDatabaseType(previousLogType) })
 	require.NoError(t, err)
-	require.NoError(t, model.DB.AutoMigrate(&model.Token{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.XCodeAuthorization{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Token{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.ZenAuthorization{}))
 	user := createMiddlewarePATUser(t, "xcode-admission-user", "unrelated-dashboard-token")
 	session := &model.UserSession{
 		SID: "xcode-admission-session", UserID: user.Id, Version: 7, UserAuthVersion: user.AuthVersion,
-		Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeXCode,
+		Status: model.UserSessionStatusActive, ClientPurpose: model.ClientPurposeZen,
 		RefreshHash: "xcode-refresh-hash", LoginMethod: "password", ExpiresAt: time.Now().Unix() + 3600,
 	}
 	require.NoError(t, model.DB.Create(session).Error)
 	token := &model.Token{
 		UserId: user.Id, Key: "xcodeadmissionkey", Status: common.TokenStatusEnabled, ExpiredTime: session.ExpiresAt,
-		UnlimitedQuota: true, ClientPurpose: model.ClientPurposeXCode, ClientSessionSID: session.SID,
+		UnlimitedQuota: true, ClientPurpose: model.ClientPurposeZen, ClientSessionSID: session.SID,
 	}
 	require.NoError(t, model.DB.Create(token).Error)
-	plan := &model.SubscriptionPlan{Title: "XCode admission", Enabled: true, QuotaResetPeriod: model.SubscriptionResetNever}
+	plan := &model.SubscriptionPlan{Title: "aiscoo zen admission", Enabled: true, QuotaResetPeriod: model.SubscriptionResetNever}
 	require.NoError(t, model.DB.Create(plan).Error)
 	model.InvalidateSubscriptionPlanCache(plan.Id)
 	t.Cleanup(func() { model.InvalidateSubscriptionPlanCache(plan.Id) })
 	subscription := &model.UserSubscription{
-		UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeXCode, Source: "admin",
+		UserId: user.Id, PlanId: plan.Id, UsageScope: model.SubscriptionUsageScopeZen, Source: "admin",
 		Status: "active", StartTime: time.Now().Unix() - 60, EndTime: time.Now().Unix() + 3600,
 		AmountTotal: 100, QuotaResetPeriodSnapshot: model.SubscriptionResetNever, QuotaResetGeneration: 1,
 	}
 	require.NoError(t, model.DB.Create(subscription).Error)
-	require.NoError(t, model.DB.Create(&model.XCodeAuthorization{UserId: user.Id, SubscriptionId: subscription.Id, Revision: 3}).Error)
+	require.NoError(t, model.DB.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: subscription.Id, Revision: 3}).Error)
 	return user, token, session, subscription
 }
 
-func xcodeAdmissionRequest(router *gin.Engine, method, path, token string) *httptest.ResponseRecorder {
+func zenAdmissionRequest(router *gin.Engine, method, path, token string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(`{"model":"free-model","max_tokens":0}`))
 	request.Header.Set("Authorization", "Bearer sk-"+token)
 	request.Header.Set("Content-Type", "application/json")
@@ -686,8 +686,8 @@ func xcodeAdmissionRequest(router *gin.Engine, method, path, token string) *http
 	return response
 }
 
-func TestXCodeAdmissionAllowedRoutesUseOnlyDesignatedFunding(t *testing.T) {
-	user, token, session, subscription := setupXCodeAdmissionTest(t)
+func TestZenAdmissionAllowedRoutesUseOnlyDesignatedFunding(t *testing.T) {
+	user, token, session, subscription := setupZenAdmissionTest(t)
 	setting := user.GetSetting()
 	setting.BillingPreference = "wallet_only"
 	user.SetSetting(setting)
@@ -705,11 +705,11 @@ func TestXCodeAdmissionAllowedRoutesUseOnlyDesignatedFunding(t *testing.T) {
 		})
 	}
 	for _, path := range []string{"/v1/messages", "/v1/chat/completions", "/v1/responses"} {
-		response := xcodeAdmissionRequest(router, http.MethodPost, path, token.Key)
+		response := zenAdmissionRequest(router, http.MethodPost, path, token.Key)
 		assert.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
 	}
 	require.NoError(t, model.DB.Model(session).Update("version", session.Version+1).Error)
-	response := xcodeAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
+	response := zenAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
 	assert.Equal(t, http.StatusNoContent, response.Code, "ordinary refresh must not revoke the bound relay key")
 	require.NoError(t, model.DB.First(subscription, subscription.Id).Error)
 	assert.Equal(t, int64(80), subscription.AmountUsed, "all admitted requests debit their designated instance")
@@ -719,8 +719,8 @@ func TestXCodeAdmissionAllowedRoutesUseOnlyDesignatedFunding(t *testing.T) {
 	assert.Equal(t, "wallet_only", observedUser.GetSetting().BillingPreference, "managed funding must not rewrite native preferences")
 }
 
-func TestXCodeAdmissionDeniedMethodPathAndKeyEntrypoints(t *testing.T) {
-	_, token, _, _ := setupXCodeAdmissionTest(t)
+func TestZenAdmissionDeniedMethodPathAndKeyEntrypoints(t *testing.T) {
+	_, token, _, _ := setupZenAdmissionTest(t)
 	for _, entrypoint := range []struct {
 		name string
 		auth gin.HandlerFunc
@@ -752,7 +752,7 @@ func TestXCodeAdmissionDeniedMethodPathAndKeyEntrypoints(t *testing.T) {
 					called = true
 					c.Status(http.StatusNoContent)
 				})
-				response := xcodeAdmissionRequest(router, route.method, route.path, token.Key)
+				response := zenAdmissionRequest(router, route.method, route.path, token.Key)
 				assert.Equal(t, http.StatusForbidden, response.Code, route.method+" "+route.path+" "+response.Body.String())
 				assert.Contains(t, response.Body.String(), `"code":"XCODE_RELAY_SCOPE_DENIED"`)
 			}
@@ -761,14 +761,14 @@ func TestXCodeAdmissionDeniedMethodPathAndKeyEntrypoints(t *testing.T) {
 	}
 }
 
-func TestXCodeAdmissionSessionPlanAndTokenFailures(t *testing.T) {
+func TestZenAdmissionSessionPlanAndTokenFailures(t *testing.T) {
 	for _, test := range []struct {
 		name, code string
 		status     int
 		mutate     func(*testing.T, *model.User, *model.Token, *model.UserSession, *model.UserSubscription)
 	}{
 		{"missing plan even for zero estimate", "XCODE_PLAN_UNASSIGNED", http.StatusForbidden, func(t *testing.T, u *model.User, _ *model.Token, _ *model.UserSession, _ *model.UserSubscription) {
-			require.NoError(t, model.DB.Where("user_id = ?", u.Id).Delete(&model.XCodeAuthorization{}).Error)
+			require.NoError(t, model.DB.Where("user_id = ?", u.Id).Delete(&model.ZenAuthorization{}).Error)
 		}},
 		{"expired plan", "XCODE_PLAN_EXPIRED", http.StatusForbidden, func(t *testing.T, _ *model.User, _ *model.Token, _ *model.UserSession, s *model.UserSubscription) {
 			require.NoError(t, model.DB.Model(s).Update("end_time", time.Now().Unix()-1).Error)
@@ -817,18 +817,18 @@ func TestXCodeAdmissionSessionPlanAndTokenFailures(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			user, token, session, subscription := setupXCodeAdmissionTest(t)
+			user, token, session, subscription := setupZenAdmissionTest(t)
 			test.mutate(t, user, token, session, subscription)
 			for _, auth := range []gin.HandlerFunc{TokenAuth(), TokenAuthReadOnly(), TokenOrUserAuth()} {
 				router := gin.New()
 				called := false
 				router.POST("/v1/messages", auth, func(c *gin.Context) { called = true; c.Status(http.StatusNoContent) })
-				response := xcodeAdmissionRequest(router, http.MethodPost, "/v1/messages", token.Key)
+				response := zenAdmissionRequest(router, http.MethodPost, "/v1/messages", token.Key)
 				assert.Equal(t, test.status, response.Code, response.Body.String())
 				assert.Contains(t, response.Body.String(), `"code":"`+test.code+`"`)
 				assert.Contains(t, response.Body.String(), `"type":"error"`, "Anthropic errors retain their top-level discriminator")
 				if test.code == "XCODE_PLAN_UNASSIGNED" || test.code == "XCODE_PLAN_EXPIRED" || test.code == "XCODE_PLAN_REVOKED" || test.code == "XCODE_SESSION_INVALID" {
-					assert.Contains(t, response.Body.String(), "aiscoo client")
+					assert.Contains(t, response.Body.String(), "aiscoo zen")
 				}
 				assert.False(t, called)
 			}
@@ -836,8 +836,8 @@ func TestXCodeAdmissionSessionPlanAndTokenFailures(t *testing.T) {
 	}
 }
 
-func TestXCodeAdmissionReadOnlyUsesSavedLanguage(t *testing.T) {
-	user, token, _, _ := setupXCodeAdmissionTest(t)
+func TestZenAdmissionReadOnlyUsesSavedLanguage(t *testing.T) {
+	user, token, _, _ := setupZenAdmissionTest(t)
 	previousLanguage := common.DefaultLanguage
 	common.DefaultLanguage = "en"
 	t.Cleanup(func() { common.DefaultLanguage = previousLanguage })
@@ -859,22 +859,22 @@ func TestXCodeAdmissionReadOnlyUsesSavedLanguage(t *testing.T) {
 			router.ServeHTTP(response, request)
 			assert.Equal(t, http.StatusForbidden, response.Code)
 			assert.Contains(t, response.Body.String(), `"code":"XCODE_RELAY_SCOPE_DENIED"`)
-			assert.Contains(t, response.Body.String(), "aiscoo 客户端转发凭据不能访问此接口")
+			assert.Contains(t, response.Body.String(), "aiscoo zen转发凭据不能访问此接口")
 		})
 	}
 }
 
-func TestXCodeAdmissionMessagesUseRequestedLanguage(t *testing.T) {
+func TestZenAdmissionMessagesUseRequestedLanguage(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	for _, tc := range []struct {
 		message, code, want string
 		status              int
 	}{
-		{"No XCode plan is assigned", "XCODE_PLAN_UNASSIGNED", "尚未分配 aiscoo 客户端套餐", http.StatusForbidden},
-		{"The XCode plan has expired", "XCODE_PLAN_EXPIRED", "aiscoo 客户端套餐已过期", http.StatusForbidden},
-		{"The XCode plan has been revoked", "XCODE_PLAN_REVOKED", "aiscoo 客户端套餐已撤销", http.StatusForbidden},
-		{"XCode session is no longer valid", "XCODE_SESSION_INVALID", "aiscoo 客户端会话已失效", http.StatusUnauthorized},
-		{"XCode authentication is temporarily unavailable", "XCODE_BACKEND_UNAVAILABLE", "aiscoo 客户端认证暂不可用", http.StatusServiceUnavailable},
+		{"No aiscoo zen plan is assigned", "XCODE_PLAN_UNASSIGNED", "尚未分配 aiscoo zen套餐", http.StatusForbidden},
+		{"The aiscoo zen plan has expired", "XCODE_PLAN_EXPIRED", "aiscoo zen套餐已过期", http.StatusForbidden},
+		{"The aiscoo zen plan has been revoked", "XCODE_PLAN_REVOKED", "aiscoo zen套餐已撤销", http.StatusForbidden},
+		{"aiscoo zen session is no longer valid", "XCODE_SESSION_INVALID", "aiscoo zen会话已失效", http.StatusUnauthorized},
+		{"aiscoo zen authentication is temporarily unavailable", "XCODE_BACKEND_UNAVAILABLE", "aiscoo zen认证暂不可用", http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -882,7 +882,7 @@ func TestXCodeAdmissionMessagesUseRequestedLanguage(t *testing.T) {
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			ctx.Request.Header.Set("Accept-Language", "zh-CN")
 			ctx.Set(common.RequestIdKey, "branding-test")
-			abortXCodeAdmission(ctx, tc.status, tc.code, tc.message)
+			abortZenAdmission(ctx, tc.status, tc.code, tc.message)
 			var body struct {
 				Error struct {
 					Code    string `json:"code"`
@@ -897,10 +897,10 @@ func TestXCodeAdmissionMessagesUseRequestedLanguage(t *testing.T) {
 	}
 }
 
-func TestXCodeAdmissionBackendFailuresAreUnavailable(t *testing.T) {
+func TestZenAdmissionBackendFailuresAreUnavailable(t *testing.T) {
 	for _, table := range []string{"users", "user_sessions", "x_code_authorizations", "user_subscriptions", "database_clock"} {
 		t.Run(table, func(t *testing.T) {
-			_, token, _, _ := setupXCodeAdmissionTest(t)
+			_, token, _, _ := setupZenAdmissionTest(t)
 			const callbackName = "test:xcode-admission-backend-failure"
 			callbacks := model.DB.Callback().Query()
 			before := "gorm:query"
@@ -916,15 +916,15 @@ func TestXCodeAdmissionBackendFailuresAreUnavailable(t *testing.T) {
 			t.Cleanup(func() { callbacks.Remove(callbackName) })
 			router := gin.New()
 			router.POST("/v1/responses", TokenAuth(), func(c *gin.Context) { t.Error("backend failure reached handler") })
-			response := xcodeAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
+			response := zenAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
 			assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 			assert.Contains(t, response.Body.String(), `"code":"XCODE_BACKEND_UNAVAILABLE"`)
 		})
 	}
 }
 
-func TestXCodeAdmissionMalformedTokenCacheStillRejectsHTTP(t *testing.T) {
-	_, token, _, _ := setupXCodeAdmissionTest(t)
+func TestZenAdmissionMalformedTokenCacheStillRejectsHTTP(t *testing.T) {
+	_, token, _, _ := setupZenAdmissionTest(t)
 	_, client := useRateLimitMiniRedis(t)
 	router := gin.New()
 	router.GET("/api/log/token", TokenAuthReadOnly(), func(c *gin.Context) { t.Error("managed readonly credential reached handler") })
@@ -936,19 +936,19 @@ func TestXCodeAdmissionMalformedTokenCacheStillRejectsHTTP(t *testing.T) {
 				_, err := model.GetTokenByKey(token.Key, false)
 				require.NoError(t, err)
 				require.NoError(t, client.HDel(client.Context(), key, field).Err())
-				response := xcodeAdmissionRequest(router, http.MethodGet, path, token.Key)
+				response := zenAdmissionRequest(router, http.MethodGet, path, token.Key)
 				assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 				assert.Contains(t, response.Body.String(), `"code":"XCODE_RELAY_SCOPE_DENIED"`)
 			}
-			assert.Equal(t, model.ClientPurposeXCode, client.HGet(client.Context(), key, "ClientPurpose").Val())
+			assert.Equal(t, model.ClientPurposeZen, client.HGet(client.Context(), key, "ClientPurpose").Val())
 			assert.Equal(t, token.ClientSessionSID, client.HGet(client.Context(), key, "ClientSessionSID").Val())
 			assert.NotEmpty(t, client.HGet(client.Context(), key, "CacheSchema").Val())
 		})
 	}
 }
 
-func TestXCodeAdmissionNativeReadonlyAndIndependentCapability(t *testing.T) {
-	_, token, _, _ := setupXCodeAdmissionTest(t)
+func TestZenAdmissionNativeReadonlyAndIndependentCapability(t *testing.T) {
+	_, token, _, _ := setupZenAdmissionTest(t)
 	native := &model.Token{
 		UserId: token.UserId, Key: "nativereadonlykey", Status: common.TokenStatusExpired,
 		ExpiredTime: time.Now().Unix() - 1, RemainQuota: 0,
@@ -972,50 +972,50 @@ func TestXCodeAdmissionNativeReadonlyAndIndependentCapability(t *testing.T) {
 		assert.Empty(t, common.GetContextKeyString(c, constant.ContextKeyClientPurpose))
 		c.Status(http.StatusNoContent)
 	})
-	assert.Equal(t, http.StatusNoContent, xcodeAdmissionRequest(router, http.MethodGet, "/api/log/token", native.Key).Code)
+	assert.Equal(t, http.StatusNoContent, zenAdmissionRequest(router, http.MethodGet, "/api/log/token", native.Key).Code)
 	require.NoError(t, model.DB.Model(native).Update("client_purpose", model.ClientPurposeGeneral).Error)
-	assert.Equal(t, http.StatusNoContent, xcodeAdmissionRequest(router, http.MethodGet, "/api/log/token", native.Key).Code)
-	response := xcodeAdmissionRequest(router, http.MethodGet, "/v1/tasks/task-1/artifacts/artifact-1/content?access="+urlQueryEscape(access), token.Key)
+	assert.Equal(t, http.StatusNoContent, zenAdmissionRequest(router, http.MethodGet, "/api/log/token", native.Key).Code)
+	response := zenAdmissionRequest(router, http.MethodGet, "/v1/tasks/task-1/artifacts/artifact-1/content?access="+urlQueryEscape(access), token.Key)
 	assert.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
-	response = xcodeAdmissionRequest(router, http.MethodGet, "/v1/tasks/task-2/artifacts/artifact-1/content?access="+urlQueryEscape(access), token.Key)
+	response = zenAdmissionRequest(router, http.MethodGet, "/v1/tasks/task-2/artifacts/artifact-1/content?access="+urlQueryEscape(access), token.Key)
 	assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 }
 
-func TestXCodeAdmissionAlternateAllowedKeyEntrypoints(t *testing.T) {
-	_, token, _, subscription := setupXCodeAdmissionTest(t)
+func TestZenAdmissionAlternateAllowedKeyEntrypoints(t *testing.T) {
+	_, token, _, subscription := setupZenAdmissionTest(t)
 	for _, auth := range []gin.HandlerFunc{TokenAuthReadOnly(), TokenOrUserAuth()} {
 		router := gin.New()
 		for _, path := range []string{"/v1/messages", "/v1/chat/completions", "/v1/responses"} {
 			router.POST(path, auth, func(c *gin.Context) {
 				assert.Equal(t, subscription.Id, common.GetContextKeyInt(c, constant.ContextKeyFundingSubscriptionID))
-				assert.Equal(t, model.SubscriptionUsageScopeXCode, common.GetContextKeyString(c, constant.ContextKeyFundingScope))
+				assert.Equal(t, model.SubscriptionUsageScopeZen, common.GetContextKeyString(c, constant.ContextKeyFundingScope))
 				c.Status(http.StatusNoContent)
 			})
-			response := xcodeAdmissionRequest(router, http.MethodPost, path, token.Key)
+			response := zenAdmissionRequest(router, http.MethodPost, path, token.Key)
 			assert.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
 		}
 	}
 }
 
-func TestXCodeAdmissionAcceptsOnlyPostOnExactRoutes(t *testing.T) {
-	_, token, _, _ := setupXCodeAdmissionTest(t)
+func TestZenAdmissionAcceptsOnlyPostOnExactRoutes(t *testing.T) {
+	_, token, _, _ := setupZenAdmissionTest(t)
 	router := gin.New()
 	for _, path := range []string{"/v1/messages", "/v1/chat/completions", "/v1/responses"} {
 		for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions} {
 			router.Handle(method, path, TokenAuth(), func(c *gin.Context) { t.Error("non-POST managed request reached relay handler") })
-			response := xcodeAdmissionRequest(router, method, path, token.Key)
+			response := zenAdmissionRequest(router, method, path, token.Key)
 			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 			assert.Contains(t, response.Body.String(), `"code":"XCODE_RELAY_SCOPE_DENIED"`)
 		}
 	}
 	router.POST("/v1/:endpoint", TokenAuth(), func(c *gin.Context) { t.Error("parameterized alias reached handler") })
-	response := xcodeAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
+	response := zenAdmissionRequest(router, http.MethodPost, "/v1/responses", token.Key)
 	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	assert.Contains(t, response.Body.String(), `"code":"XCODE_RELAY_SCOPE_DENIED"`)
 }
 
-func TestXCodeAdmissionKeyHeaderAndQueryDispatch(t *testing.T) {
-	_, token, _, subscription := setupXCodeAdmissionTest(t)
+func TestZenAdmissionKeyHeaderAndQueryDispatch(t *testing.T) {
+	_, token, _, subscription := setupZenAdmissionTest(t)
 	for _, test := range []struct {
 		name, method, path, header, value string
 		status                            int

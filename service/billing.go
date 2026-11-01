@@ -40,16 +40,16 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 		)
 	}
 	if relayInfo != nil && relayInfo.Billing != nil {
-		managed := relayInfo.ClientPurpose == model.ClientPurposeXCode || relayInfo.FundingScope == model.SubscriptionUsageScopeXCode
+		managed := relayInfo.ClientPurpose == model.ClientPurposeZen || relayInfo.FundingScope == model.SubscriptionUsageScopeZen
 		if managed {
 			session, ok := relayInfo.Billing.(*BillingSession)
 			if !ok || !session.isManaged() {
-				return xcodeFundingError(model.ErrSubscriptionFundingTargetInvalid)
+				return zenFundingError(model.ErrSubscriptionFundingTargetInvalid)
 			}
 		}
 		if err := relayInfo.Billing.ReserveBeforeSubmit(preConsumedQuota); err != nil {
 			if managed {
-				return xcodeFundingError(err)
+				return zenFundingError(err)
 			}
 			var apiErr *types.NewAPIError
 			if errors.As(err, &apiErr) {
@@ -67,19 +67,19 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	return nil
 }
 
-func xcodeFundingError(err error) *types.NewAPIError {
+func zenFundingError(err error) *types.NewAPIError {
 	code := types.ErrorCode("XCODE_BACKEND_UNAVAILABLE")
 	status := http.StatusServiceUnavailable
 	switch {
 	case errors.Is(err, model.ErrSubscriptionQuotaInsufficient):
 		code, status = "XCODE_QUOTA_EXHAUSTED", http.StatusTooManyRequests
-	case errors.Is(err, model.ErrXCodePlanUnassigned), errors.Is(err, model.ErrNoActiveSubscription):
+	case errors.Is(err, model.ErrZenPlanUnassigned), errors.Is(err, model.ErrNoActiveSubscription):
 		code, status = "XCODE_PLAN_UNASSIGNED", http.StatusForbidden
-	case errors.Is(err, model.ErrXCodePlanExpired):
+	case errors.Is(err, model.ErrZenPlanExpired):
 		code, status = "XCODE_PLAN_EXPIRED", http.StatusForbidden
-	case errors.Is(err, model.ErrXCodePlanRevoked):
+	case errors.Is(err, model.ErrZenPlanRevoked):
 		code, status = "XCODE_PLAN_REVOKED", http.StatusForbidden
-	case errors.Is(err, model.ErrXCodeAuthorizationConflict), errors.Is(err, model.ErrSubscriptionRequestConflict):
+	case errors.Is(err, model.ErrZenAuthorizationConflict), errors.Is(err, model.ErrSubscriptionRequestConflict):
 		code, status = "XCODE_AUTHORIZATION_CONFLICT", http.StatusConflict
 	case errors.Is(err, model.ErrSubscriptionFundingTargetInvalid):
 		code, status = "XCODE_CREDENTIAL_SCOPE_DENIED", http.StatusForbidden
@@ -121,7 +121,7 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	if actualQuota < 0 {
 		return errors.New("actual quota cannot be negative")
 	}
-	if relayInfo.ClientPurpose == model.ClientPurposeXCode || relayInfo.FundingScope == model.SubscriptionUsageScopeXCode {
+	if relayInfo.ClientPurpose == model.ClientPurposeZen || relayInfo.FundingScope == model.SubscriptionUsageScopeZen {
 		session, ok := relayInfo.Billing.(*BillingSession)
 		if !ok || !session.isManaged() {
 			return model.ErrSubscriptionFundingTargetInvalid

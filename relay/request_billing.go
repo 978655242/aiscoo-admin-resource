@@ -61,7 +61,7 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 	}
-	if priceData.FreeModel && info.ClientPurpose != model.ClientPurposeXCode && info.FundingScope != model.SubscriptionUsageScopeXCode {
+	if priceData.FreeModel && info.ClientPurpose != model.ClientPurposeZen && info.FundingScope != model.SubscriptionUsageScopeZen {
 		logger.LogInfo(c, common.LogText("model %s is free, skipping pre-consume", info.OriginModelName))
 		return nil
 	}

@@ -1298,7 +1298,7 @@ func respondPluginProtocolSubmissionError(c *gin.Context, taskErr *dto.TaskError
 	if taskErr != nil && taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
 		status = taskErr.StatusCode
 	}
-	if taskErr != nil && common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode && strings.HasPrefix(taskErr.Code, "XCODE_") {
+	if taskErr != nil && common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen && strings.HasPrefix(taskErr.Code, "XCODE_") {
 		writeRelayError(c, types.RelayFormatOpenAIResponses, types.NewErrorWithStatusCode(errors.New(taskErr.Message), types.ErrorCode(taskErr.Code), status, types.ErrOptionWithSkipRetry()), nil)
 		return
 	}

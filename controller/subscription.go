@@ -295,8 +295,8 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"downgrade_group":            req.Plan.DowngradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
-			// XCODE: explicit map updates must preserve both metadata edits and null clearing.
-			"xcode_display": req.Plan.XCodeDisplay,
+			// ZEN: explicit map updates must preserve both metadata edits and null clearing.
+			"xcode_display": req.Plan.ZenDisplay,
 			"updated_at":    common.GetTimestamp(),
 		}
 		// An omitted currency keeps the stored one, so editing in the console never resets CNY to USD.
@@ -531,8 +531,8 @@ func AdminInvalidateUserSubscription(c *gin.Context) {
 		})
 	}
 	if err != nil {
-		if result != nil && result.UsageScope == model.SubscriptionUsageScopeXCode {
-			xcodeAuthorizationError(c, err)
+		if result != nil && result.UsageScope == model.SubscriptionUsageScopeZen {
+			zenAuthorizationError(c, err)
 			return
 		}
 		common.ApiError(c, err)
@@ -556,12 +556,12 @@ func AdminDeleteUserSubscription(c *gin.Context) {
 		})
 	}
 	if err != nil {
-		if result != nil && result.UsageScope == model.SubscriptionUsageScopeXCode {
-			xcodeAuthorizationError(c, err)
+		if result != nil && result.UsageScope == model.SubscriptionUsageScopeZen {
+			zenAuthorizationError(c, err)
 			return
 		}
-		if errors.Is(err, model.ErrXCodeAuthorizationConflict) {
-			xcodeAPIError(c, http.StatusConflict, "XCODE_AUTHORIZATION_CONFLICT", "This XCode subscription has authorization or accounting references; cancel it instead")
+		if errors.Is(err, model.ErrZenAuthorizationConflict) {
+			zenAPIError(c, http.StatusConflict, "XCODE_AUTHORIZATION_CONFLICT", "This aiscoo zen subscription has authorization or accounting references; cancel it instead")
 			return
 		}
 		common.ApiError(c, err)

@@ -25,10 +25,10 @@ const (
 	securityProofTokenUse = "security_proof"
 	authTokenIssuer       = "new-api"
 	authTokenAudience     = "new-api-dashboard"
-	xcodeAccessTokenUse   = "xcode_access"
-	xcodeWebTokenUse      = "xcode_web"
-	xcodeTokenAudience    = "new-api-xcode"
-	xcodeWebTokenAudience = "new-api-xcode-web"
+	zenAccessTokenUse     = "xcode_access"
+	zenWebTokenUse        = "xcode_web"
+	zenTokenAudience      = "new-api-xcode"
+	zenWebTokenAudience   = "new-api-xcode-web"
 )
 
 var (
@@ -66,19 +66,19 @@ func IssueAccessToken(identity AuthIdentity) (string, int64, error) {
 	return issueAccessToken(identity, accessTokenUse, time.Now().Add(AccessTokenTTL).Unix())
 }
 
-func IssueXCodeAccessToken(session *model.UserSession) (string, int64, error) {
-	return issueXCodeToken(session, xcodeAccessTokenUse)
+func IssueZenAccessToken(session *model.UserSession) (string, int64, error) {
+	return issueZenToken(session, zenAccessTokenUse)
 }
 
-func IssueXCodeWebToken(session *model.UserSession) (string, int64, error) {
-	return issueXCodeToken(session, xcodeWebTokenUse)
+func IssueZenWebToken(session *model.UserSession) (string, int64, error) {
+	return issueZenToken(session, zenWebTokenUse)
 }
 
-func issueXCodeToken(session *model.UserSession, use string) (string, int64, error) {
+func issueZenToken(session *model.UserSession, use string) (string, int64, error) {
 	if session == nil {
 		return "", 0, ErrLoginSessionInvalid
 	}
-	if session.ClientPurpose != model.ClientPurposeXCode {
+	if session.ClientPurpose != model.ClientPurposeZen {
 		return "", 0, ErrAuthCredentialScopeDenied
 	}
 	if session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= time.Now().Unix() {
@@ -111,7 +111,7 @@ func issueAccessToken(identity AuthIdentity, use string, expiresAt int64) (strin
 			ID:        uuid.NewString(),
 		},
 	}
-	if use == xcodeAccessTokenUse {
+	if use == zenAccessTokenUse {
 		claims.Scopes = []string{"profile:read", "wallet:read", "usage:read"}
 	}
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(authSigningKey(use))
@@ -122,12 +122,12 @@ func ParseAccessToken(raw string) (AuthIdentity, error) {
 	return parseAccessToken(raw, accessTokenUse)
 }
 
-func ParseXCodeAccessToken(raw string) (AuthIdentity, error) {
-	return parseAccessToken(raw, xcodeAccessTokenUse)
+func ParseZenAccessToken(raw string) (AuthIdentity, error) {
+	return parseAccessToken(raw, zenAccessTokenUse)
 }
 
-func ParseXCodeWebToken(raw string) (AuthIdentity, error) {
-	return parseAccessToken(raw, xcodeWebTokenUse)
+func ParseZenWebToken(raw string) (AuthIdentity, error) {
+	return parseAccessToken(raw, zenWebTokenUse)
 }
 
 func parseAccessToken(raw, expectedUse string) (AuthIdentity, error) {
@@ -140,17 +140,17 @@ func parseAccessToken(raw, expectedUse string) (AuthIdentity, error) {
 }
 
 func parseAccessTokenForUse(raw, expectedUse, use string) (AuthIdentity, error) {
-	if use != accessTokenUse && use != xcodeAccessTokenUse && use != xcodeWebTokenUse {
+	if use != accessTokenUse && use != zenAccessTokenUse && use != zenWebTokenUse {
 		return AuthIdentity{}, ErrAuthTokenInvalid
 	}
 	claims, err := parseAuthClaims(raw, use, authSigningKey(use))
 	if err != nil {
 		return AuthIdentity{}, err
 	}
-	if use == xcodeAccessTokenUse && !slices.Equal(claims.Scopes, []string{"profile:read", "wallet:read", "usage:read"}) {
+	if use == zenAccessTokenUse && !slices.Equal(claims.Scopes, []string{"profile:read", "wallet:read", "usage:read"}) {
 		return AuthIdentity{}, ErrAuthTokenInvalid
 	}
-	if use == xcodeWebTokenUse && len(claims.Scopes) != 0 {
+	if use == zenWebTokenUse && len(claims.Scopes) != 0 {
 		return AuthIdentity{}, ErrAuthTokenInvalid
 	}
 	userID, err := strconv.Atoi(claims.Subject)
@@ -168,7 +168,7 @@ func parseAccessTokenForUse(raw, expectedUse, use string) (AuthIdentity, error) 
 	}, nil
 }
 
-// ParseDashboardAccessToken recognizes internal dashboard and XCode JWT shapes
+// ParseDashboardAccessToken recognizes internal dashboard and aiscoo zen JWT shapes
 // before opaque lookup, including invalid signatures, expiry and purpose.
 func ParseDashboardAccessToken(raw string) (identity AuthIdentity, internal bool, err error) {
 	raw = strings.TrimSpace(raw)
@@ -185,9 +185,9 @@ func ParseDashboardAccessToken(raw string) (identity AuthIdentity, internal bool
 	use, _ := claims["token_use"].(string)
 	audienceMatches := slices.Contains(audience, authTokenAudience)
 	knownTokenUse := use == accessTokenUse || use == securityProofTokenUse
-	xcodeShape := slices.Contains(audience, xcodeTokenAudience) || slices.Contains(audience, xcodeWebTokenAudience) ||
-		use == xcodeAccessTokenUse || use == xcodeWebTokenUse
-	if !xcodeShape && (issuer != authTokenIssuer || !audienceMatches || !knownTokenUse) {
+	zenShape := slices.Contains(audience, zenTokenAudience) || slices.Contains(audience, zenWebTokenAudience) ||
+		use == zenAccessTokenUse || use == zenWebTokenUse
+	if !zenShape && (issuer != authTokenIssuer || !audienceMatches || !knownTokenUse) {
 		return AuthIdentity{}, false, nil
 	}
 	identity, err = parseAccessTokenForUse(raw, accessTokenUse, use)
@@ -253,10 +253,10 @@ func verifySecurityProof(raw string, identity AuthIdentity, binding Verification
 
 func authAudience(use string) string {
 	switch use {
-	case xcodeAccessTokenUse:
-		return xcodeTokenAudience
-	case xcodeWebTokenUse:
-		return xcodeWebTokenAudience
+	case zenAccessTokenUse:
+		return zenTokenAudience
+	case zenWebTokenUse:
+		return zenWebTokenAudience
 	default:
 		return authTokenAudience
 	}
@@ -269,7 +269,7 @@ func parseAuthClaims(raw, expectedUse string, key []byte) (*authClaims, error) {
 	}
 	claims := &authClaims{}
 	leeway := 5 * time.Second
-	if expectedUse == xcodeAccessTokenUse || expectedUse == xcodeWebTokenUse {
+	if expectedUse == zenAccessTokenUse || expectedUse == zenWebTokenUse {
 		leeway = 0
 	}
 	parsed, err := jwt.ParseWithClaims(raw, claims, func(token *jwt.Token) (any, error) {
@@ -287,7 +287,7 @@ func parseAuthClaims(raw, expectedUse string, key []byte) (*authClaims, error) {
 	if !parsed.Valid || claims.TokenUse != expectedUse || claims.ID == "" || claims.IssuedAt == nil || claims.NotBefore == nil {
 		return nil, ErrAuthTokenInvalid
 	}
-	if (expectedUse == xcodeAccessTokenUse || expectedUse == xcodeWebTokenUse) &&
+	if (expectedUse == zenAccessTokenUse || expectedUse == zenWebTokenUse) &&
 		(len(claims.Audience) != 1 || claims.Audience[0] != authAudience(expectedUse)) {
 		return nil, ErrAuthTokenInvalid
 	}

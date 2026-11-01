@@ -78,23 +78,23 @@ func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
 }
 
-// refreshXCodeChannelAuthority keeps native selection rules but restricts every
+// refreshZenChannelAuthority keeps native selection rules but restricts every
 // managed attempt to its admitted byte-exact group/model and live channels.
-func refreshXCodeChannelAuthority(c *gin.Context, modelName string) (string, error) {
-	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeXCode {
+func refreshZenChannelAuthority(c *gin.Context, modelName string) (string, error) {
+	if common.GetContextKeyString(c, constant.ContextKeyClientPurpose) != model.ClientPurposeZen {
 		return "", nil
 	}
 	constraints := GetChannelConstraints(c)
 	for i := range constraints.Filters {
 		filter := &constraints.Filters[i]
-		if filter.Kind != dto.FilterXCodeAuthority {
+		if filter.Kind != dto.FilterZenAuthority {
 			continue
 		}
 		filter.ChannelIDs = nil
 		if filter.Model != modelName {
-			return "", ErrXCodeModelUnavailable
+			return "", ErrZenModelUnavailable
 		}
-		candidates, err := model.GetXCodeAvailableModelAbilities(filter.Group, filter.Model)
+		candidates, err := model.GetZenAvailableModelAbilities(filter.Group, filter.Model)
 		if err != nil {
 			return "", err
 		}
@@ -106,7 +106,7 @@ func refreshXCodeChannelAuthority(c *gin.Context, modelName string) (string, err
 		}
 		return filter.Group, nil
 	}
-	return "", ErrXCodeModelUnavailable
+	return "", ErrZenModelUnavailable
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -145,11 +145,11 @@ func refreshXCodeChannelAuthority(c *gin.Context, modelName string) (string, err
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
-	group, err := refreshXCodeChannelAuthority(param.Ctx, param.ModelName)
+	group, err := refreshZenChannelAuthority(param.Ctx, param.ModelName)
 	if err != nil {
 		return nil, param.TokenGroup, err
 	}
-	if common.GetContextKeyString(param.Ctx, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode {
+	if common.GetContextKeyString(param.Ctx, constant.ContextKeyClientPurpose) == model.ClientPurposeZen {
 		param.TokenGroup = group
 	}
 	return cacheGetRandomSatisfiedChannel(param)
@@ -163,7 +163,7 @@ func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	filters := GetChannelConstraints(param.Ctx).Filters
 	affinityRetryOffset := param.Ctx.GetInt(ginKeyChannelAffinityRetryOffset)
 
-	if param.TokenGroup == "auto" && common.GetContextKeyString(param.Ctx, constant.ContextKeyClientPurpose) != model.ClientPurposeXCode {
+	if param.TokenGroup == "auto" && common.GetContextKeyString(param.Ctx, constant.ContextKeyClientPurpose) != model.ClientPurposeZen {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
 		if len(autoGroups) == 0 {
 			return nil, selectGroup, errors.New("auto groups is not enabled")
@@ -329,11 +329,11 @@ type ChannelSelectError struct {
 // filters. The group the channel was chosen from is returned for auto-group
 // callers. The caller still applies SetupContextForSelectedChannel.
 func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam) (*model.Channel, string, *ChannelSelectError) {
-	group, err := refreshXCodeChannelAuthority(c, modelName)
+	group, err := refreshZenChannelAuthority(c, modelName)
 	if err != nil {
 		return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeGetChannelFailed, Message: "XCODE_BACKEND_UNAVAILABLE"}
 	}
-	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeXCode
+	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
 	if managed {
 		retry.TokenGroup = group
 	}

@@ -111,7 +111,7 @@ func TestWriteRelayErrorPreservesUpstreamClaudeType(t *testing.T) {
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			if managed {
-				common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+				common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 			}
 			upstream := types.ClaudeError{Type: "overloaded_error", Message: "upstream overloaded"}
 			writeRelayError(ctx, types.RelayFormatClaude, types.WithClaudeError(upstream, http.StatusServiceUnavailable), nil)
@@ -126,7 +126,7 @@ func TestWriteRelayErrorPreservesUpstreamClaudeType(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-		common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+		common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 		ctx.Set(common.RequestIdKey, "upstream-type-request")
 		response := &http.Response{
 			StatusCode: http.StatusServiceUnavailable,
@@ -157,12 +157,12 @@ func TestWriteRelayErrorClientMessages(t *testing.T) {
 		english string
 		chinese string
 	}{
-		{"backend", service.ErrXCodeBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, "aiscoo client service is temporarily unavailable", "aiscoo 客户端服务暂不可用"},
-		{"unassigned", model.ErrXCodePlanUnassigned, "XCODE_PLAN_UNASSIGNED", http.StatusForbidden, "aiscoo client plan is unassigned", "尚未分配 aiscoo 客户端套餐"},
-		{"expired", model.ErrXCodePlanExpired, "XCODE_PLAN_EXPIRED", http.StatusForbidden, "aiscoo client plan is expired", "aiscoo 客户端套餐已过期"},
-		{"revoked", model.ErrXCodePlanRevoked, "XCODE_PLAN_REVOKED", http.StatusForbidden, "aiscoo client plan is revoked", "aiscoo 客户端套餐已撤销"},
-		{"changed", model.ErrXCodeAuthorizationConflict, "XCODE_AUTHORIZATION_CONFLICT", http.StatusConflict, "aiscoo client authorization changed", "aiscoo 客户端授权已变更"},
-		{"model", service.ErrXCodeModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, "aiscoo client model is unavailable for this protocol", "此协议下 aiscoo 客户端模型不可用"},
+		{"backend", service.ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, "aiscoo zen service is temporarily unavailable", "aiscoo zen服务暂不可用"},
+		{"unassigned", model.ErrZenPlanUnassigned, "XCODE_PLAN_UNASSIGNED", http.StatusForbidden, "aiscoo zen plan is unassigned", "尚未分配 aiscoo zen套餐"},
+		{"expired", model.ErrZenPlanExpired, "XCODE_PLAN_EXPIRED", http.StatusForbidden, "aiscoo zen plan is expired", "aiscoo zen套餐已过期"},
+		{"revoked", model.ErrZenPlanRevoked, "XCODE_PLAN_REVOKED", http.StatusForbidden, "aiscoo zen plan is revoked", "aiscoo zen套餐已撤销"},
+		{"changed", model.ErrZenAuthorizationConflict, "XCODE_AUTHORIZATION_CONFLICT", http.StatusConflict, "aiscoo zen authorization changed", "aiscoo zen授权已变更"},
+		{"model", service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, "aiscoo zen model is unavailable for this protocol", "此协议下 aiscoo zen模型不可用"},
 	} {
 		for _, language := range []struct{ tag, message string }{{"en", tc.english}, {"zh-CN", tc.chinese}} {
 			for _, protocol := range []struct {
@@ -179,7 +179,7 @@ func TestWriteRelayErrorClientMessages(t *testing.T) {
 					ctx.Request = httptest.NewRequest(http.MethodPost, protocol.path, nil)
 					ctx.Request.Header.Set("Accept-Language", language.tag)
 					ctx.Set(common.RequestIdKey, "branding-test")
-					common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+					common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 					apiError := types.NewErrorWithStatusCode(tc.err, tc.code, tc.status)
 					writeRelayError(ctx, protocol.format, apiError, nil)
 					assert.Equal(t, tc.status, recorder.Code)
@@ -215,7 +215,7 @@ func TestWriteRelayErrorManagedClaudeAdmissionCodes(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-			common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeXCode)
+			common.SetContextKey(ctx, constant.ContextKeyClientPurpose, model.ClientPurposeZen)
 			apiError := types.NewErrorWithStatusCode(errors.New("admission rejected"), tc.code, tc.status)
 			writeRelayError(ctx, types.RelayFormatClaude, apiError, nil)
 			assert.Equal(t, tc.status, recorder.Code)

@@ -29,7 +29,7 @@ export function normalizeSystemName(name: unknown): string {
     case 'oneapi':
     case 'one-api':
     case 'xwork':
-    case 'xcode':
+    case 'zen':
     case 'aiscoo':
       return DEFAULT_SYSTEM_NAME
     default:

@@ -22,7 +22,7 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import {
-  xcodePlanDisplaySchema,
+  zenPlanDisplaySchema,
   type SubscriptionPlan,
   type PlanPayload,
 } from '../types'
@@ -54,8 +54,8 @@ export function getPlanFormSchema(t: TFunction) {
     stripe_price_id: z.string().optional(),
     creem_product_id: z.string().optional(),
     waffo_pancake_product_id: z.string().optional(),
-    // XCODE: nullable metadata keeps an unconfigured native plan distinct from an invalid partial display.
-    xcode_display: xcodePlanDisplaySchema.nullable(),
+    // ZEN: nullable metadata keeps an unconfigured native plan distinct from an invalid partial display.
+    xcode_display: zenPlanDisplaySchema.nullable(),
   })
 }
 

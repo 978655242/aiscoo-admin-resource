@@ -746,9 +746,9 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
-/* XCODE: isolated XWork viewer tokens; native aiscoo theme presets remain untouched. */
-.xcode-plans,
-.xcode-plans-dialog {
+/* ZEN: isolated XWork viewer tokens; native aiscoo theme presets remain untouched. */
+.zen-plans,
+.zen-plans-dialog {
   --color-background: #f8f8f8;
   --color-card: #ffffff;
   --color-popover: #ffffff;
@@ -786,8 +786,8 @@ For commercial licensing, please contact support@quantumnous.com
   line-height: 1.5;
 }
 
-.dark .xcode-plans,
-.dark .xcode-plans-dialog {
+.dark .zen-plans,
+.dark .zen-plans-dialog {
   --color-background: #161616;
   --color-card: #2b2b2b;
   --color-popover: #2b2b2b;
@@ -851,39 +851,39 @@ For commercial licensing, please contact support@quantumnous.com
   box-shadow: 0 4px 8px rgba(26, 90, 216, 0.2);
 }
 
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-xl {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-xl {
   font-size: calc(var(--ui-font-size, 14px) + 4px);
 }
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-lg {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-lg {
   font-size: calc(var(--ui-font-size, 14px) + 2px);
 }
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-base {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-base {
   font-size: var(--ui-font-size, 14px);
 }
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-caption {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-caption {
   font-size: calc(var(--ui-font-size, 14px) - 1px);
 }
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-sm {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-sm {
   font-size: calc(var(--ui-font-size, 14px) - 2px);
 }
-:is(.xcode-plans, .xcode-plans-dialog) .text-ui-xs {
+:is(.zen-plans, .zen-plans-dialog) .text-ui-xs {
   font-size: calc(var(--ui-font-size, 14px) - 4px);
 }
 
-.xcode-plans {
+.zen-plans {
   min-height: 100svh;
   background: var(--color-background);
 }
 
-.xcode-plans-content {
+.zen-plans-content {
   width: 100%;
   max-width: 1400px;
   margin-inline: auto;
   padding: 24px;
 }
 
-.xcode-plan-audience,
-.xcode-plan-cycles {
+.zen-plan-audience,
+.zen-plan-cycles {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -896,8 +896,8 @@ For commercial licensing, please contact support@quantumnous.com
   border-radius: 999px;
 }
 
-.xcode-plan-audience button,
-.xcode-plan-cycles button {
+.zen-plan-audience button,
+.zen-plan-cycles button {
   height: auto;
   min-height: 40px;
   padding: 8px 24px;
@@ -905,17 +905,17 @@ For commercial licensing, please contact support@quantumnous.com
   white-space: normal;
 }
 
-.xcode-plan-audience button[aria-pressed='true'] {
+.zen-plan-audience button[aria-pressed='true'] {
   background: var(--color-primary);
   color: var(--color-primary-foreground);
 }
 
-.xcode-plan-cycles button[aria-pressed='true'] {
+.zen-plan-cycles button[aria-pressed='true'] {
   background: var(--color-selected);
   color: var(--color-foreground);
 }
 
-.xcode-plan-summary {
+.zen-plan-summary {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -926,24 +926,24 @@ For commercial licensing, please contact support@quantumnous.com
   overflow-wrap: anywhere;
 }
 
-.xcode-plan-summary > :first-child {
+.zen-plan-summary > :first-child {
   color: var(--color-foreground);
 }
 
-.xcode-plan-status,
-.xcode-plan-tag {
+.zen-plan-status,
+.zen-plan-tag {
   border: 1px solid var(--color-border);
   border-radius: 999px;
   padding: 2px 8px;
   color: var(--color-foreground-subtle);
 }
 
-.xcode-plan-grid-container {
+.zen-plan-grid-container {
   container-type: inline-size;
   margin-top: 16px;
 }
 
-.xcode-plan-grid {
+.zen-plan-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
@@ -951,18 +951,18 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 @container (min-width: 416px) {
-  .xcode-plan-grid {
+  .zen-plan-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @container (min-width: 848px) {
-  .xcode-plan-grid {
+  .zen-plan-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
-.xcode-plan-card {
+.zen-plan-card {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -973,7 +973,7 @@ For commercial licensing, please contact support@quantumnous.com
   overflow-wrap: anywhere;
 }
 
-.xcode-plan-card-heading {
+.zen-plan-card-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -982,35 +982,35 @@ For commercial licensing, please contact support@quantumnous.com
   margin-bottom: 16px;
 }
 
-.xcode-plan-price {
+.zen-plan-price {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.xcode-plan-price strong {
+.zen-plan-price strong {
   font-size: calc(var(--ui-font-size, 14px) + 12px);
 }
 
-.xcode-plan-secondary,
-.xcode-plan-missing {
+.zen-plan-secondary,
+.zen-plan-missing {
   color: var(--color-foreground-subtle);
 }
 
-.xcode-plan-highlights {
+.zen-plan-highlights {
   display: grid;
   gap: 6px;
   margin-block: 16px;
 }
 
-.xcode-plan-highlights li {
+.zen-plan-highlights li {
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
 
-.xcode-plan-features {
+.zen-plan-features {
   display: grid;
   gap: 8px;
   border-top: 1px solid var(--color-border);
@@ -1019,23 +1019,23 @@ For commercial licensing, please contact support@quantumnous.com
   color: var(--color-foreground-subtle);
 }
 
-.xcode-plan-features li {
+.zen-plan-features li {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
 
-.xcode-plan-config-issue,
-.xcode-plan-saving {
+.zen-plan-config-issue,
+.zen-plan-saving {
   margin-block: 8px;
 }
 
-.xcode-plan-card-action {
+.zen-plan-card-action {
   margin-top: auto;
   padding-top: 24px;
 }
 
-.xcode-plan-cta {
+.zen-plan-cta {
   width: 100%;
   min-height: 40px;
   height: auto;
@@ -1047,37 +1047,37 @@ For commercial licensing, please contact support@quantumnous.com
   color: var(--color-cta-foreground);
 }
 
-.xcode-plan-cta:hover {
+.zen-plan-cta:hover {
   background: var(--color-cta);
   color: var(--color-cta-foreground);
 }
 
-.xcode-plan-notice {
+.zen-plan-notice {
   padding-block: 40px;
   text-align: center;
   overflow-wrap: anywhere;
 }
 
-.xcode-plan-footer {
+.zen-plan-footer {
   color: var(--color-foreground-subtle);
   margin-top: 24px;
 }
 
-.xcode-plans-dialog {
+.zen-plans-dialog {
   background: var(--color-popover);
   border-radius: 16px;
   overflow-wrap: anywhere;
 }
 
-.xcode-plans .xcode-plan-notice {
+.zen-plans .zen-plan-notice {
   min-height: 160px;
 }
 
-.xcode-plans .xcode-plan-notice [data-slot='empty-title'] {
+.zen-plans .zen-plan-notice [data-slot='empty-title'] {
   font-size: calc(var(--ui-font-size, 14px) + 2px);
 }
 
-.xcode-plans .xcode-plan-notice [data-slot='empty-description'],
-.xcode-plans .xcode-plan-notice p {
+.zen-plans .zen-plan-notice [data-slot='empty-description'],
+.zen-plans .zen-plan-notice p {
   font-size: calc(var(--ui-font-size, 14px) - 2px);
 }

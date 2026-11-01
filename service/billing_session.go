@@ -198,12 +198,12 @@ func (s *BillingSession) reserve(targetQuota int, requireAvailableQuota bool) er
 			return errors.New("reserve quota overflow")
 		}
 		// Even a cheaper retry must reserve the full amount again after a reset.
-		mutation, err := model.ReserveXCodeSubscriptionRequest(funding.requestId, funding.userId, funding.subscriptionId, int64(reservedQuota))
+		mutation, err := model.ReserveZenSubscriptionRequest(funding.requestId, funding.userId, funding.subscriptionId, int64(reservedQuota))
 		if err != nil {
 			return err
 		}
 		if err := s.reserveToken(delta); err != nil {
-			if rollbackErr := model.RollbackXCodeSubscriptionReserve(funding.requestId, funding.userId, funding.subscriptionId, mutation); rollbackErr != nil {
+			if rollbackErr := model.RollbackZenSubscriptionReserve(funding.requestId, funding.userId, funding.subscriptionId, mutation); rollbackErr != nil {
 				return fmt.Errorf("%w; rolling back subscription reserve: %v", err, rollbackErr)
 			}
 			return err
@@ -250,7 +250,7 @@ func (s *BillingSession) reserve(targetQuota int, requireAvailableQuota bool) er
 
 func (s *BillingSession) isManaged() bool {
 	sub, ok := s.funding.(*SubscriptionFunding)
-	return ok && sub.target.Scope == model.SubscriptionUsageScopeXCode
+	return ok && sub.target.Scope == model.SubscriptionUsageScopeZen
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +292,8 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 			}
 			s.tokenConsumed = 0
 		}
-		if s.relayInfo.ClientPurpose == model.ClientPurposeXCode {
-			return xcodeFundingError(err)
+		if s.relayInfo.ClientPurpose == model.ClientPurposeZen {
+			return zenFundingError(err)
 		}
 		if errors.Is(err, ErrInsufficientWalletQuota) {
 			userQuota, quotaErr := model.GetUserQuota(s.relayInfo.UserId, false)
@@ -460,7 +460,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		return nil, types.NewErrorWithStatusCode(errors.New("pre-consume quota cannot be negative"), types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 
-	managed := relayInfo.ClientPurpose == model.ClientPurposeXCode
+	managed := relayInfo.ClientPurpose == model.ClientPurposeZen
 	target := model.SubscriptionFundingTarget{Scope: model.SubscriptionUsageScopeGeneral}
 	if managed {
 		target = model.SubscriptionFundingTarget{
@@ -468,7 +468,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			SubscriptionID:        relayInfo.FundingSubscriptionID,
 			AuthorizationRevision: relayInfo.FundingAuthorizationRevision,
 		}
-		if target.Scope != model.SubscriptionUsageScopeXCode || target.SubscriptionID <= 0 || target.AuthorizationRevision <= 0 {
+		if target.Scope != model.SubscriptionUsageScopeZen || target.SubscriptionID <= 0 || target.AuthorizationRevision <= 0 {
 			return nil, types.NewErrorWithStatusCode(model.ErrSubscriptionFundingTargetInvalid, "XCODE_CREDENTIAL_SCOPE_DENIED", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	} else if (relayInfo.ClientPurpose != "" && relayInfo.ClientPurpose != model.ClientPurposeGeneral && relayInfo.ClientPurpose != model.ClientPurposeDashboard) ||

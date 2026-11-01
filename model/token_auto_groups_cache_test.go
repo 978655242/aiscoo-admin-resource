@@ -169,11 +169,11 @@ func newManagedTokenTestFixture(t *testing.T) Token {
 	t.Helper()
 	require.NoError(t, DB.Create(&User{Id: 7, Username: "managed-token-owner", Status: common.UserStatusEnabled, AuthVersion: 1}).Error)
 	session := newTestUserSession("managed-session", 7, time.Now().Unix())
-	session.ClientPurpose = ClientPurposeXCode
+	session.ClientPurpose = ClientPurposeZen
 	require.NoError(t, DB.Create(session).Error)
 	return Token{
 		UserId: 7, Key: "managed-client-cache", Name: "managed",
-		Status: common.TokenStatusEnabled, ClientPurpose: ClientPurposeXCode,
+		Status: common.TokenStatusEnabled, ClientPurpose: ClientPurposeZen,
 		ClientSessionSID: session.SID, UnlimitedQuota: true, ExpiredTime: session.ExpiresAt,
 	}
 }
@@ -201,7 +201,7 @@ func TestManagedTokenCreationPolicy(t *testing.T) {
 			truncateTables(t)
 			token := newManagedTokenTestFixture(t)
 			tc.change(&token)
-			require.ErrorIs(t, DB.Create(&token).Error, ErrXCodeManagedTokenInvalid)
+			require.ErrorIs(t, DB.Create(&token).Error, ErrZenManagedTokenInvalid)
 			var count int64
 			require.NoError(t, DB.Model(&Token{}).Count(&count).Error)
 			assert.Zero(t, count)
@@ -227,10 +227,10 @@ func TestManagedTokenMutationUsesStoredAuthority(t *testing.T) {
 			token := newManagedTokenTestFixture(t)
 			require.NoError(t, token.Insert())
 			tc.change(&token)
-			require.ErrorIs(t, token.Update(), ErrXCodeManagedTokenInvalid)
+			require.ErrorIs(t, token.Update(), ErrZenManagedTokenInvalid)
 			stored, err := GetTokenById(token.Id)
 			require.NoError(t, err)
-			assert.Equal(t, ClientPurposeXCode, stored.ClientPurpose)
+			assert.Equal(t, ClientPurposeZen, stored.ClientPurpose)
 			assert.True(t, stored.UnlimitedQuota)
 			assert.Empty(t, stored.Group)
 			assert.Zero(t, stored.RemainQuota)
@@ -254,11 +254,11 @@ func TestManagedTokenMutationUsesStoredAuthority(t *testing.T) {
 		_, err = GetUserSessionCached(token.ClientSessionSID)
 		require.ErrorIs(t, err, ErrUserSessionInactive)
 		liar.Status = common.TokenStatusEnabled
-		require.ErrorIs(t, liar.SelectUpdate(), ErrXCodeManagedTokenInvalid)
+		require.ErrorIs(t, liar.SelectUpdate(), ErrZenManagedTokenInvalid)
 	})
 }
 
-func TestManagedTokenDeleteRevokesOnlyRelatedXCodeSID(t *testing.T) {
+func TestManagedTokenDeleteRevokesOnlyRelatedZenSID(t *testing.T) {
 	for _, operation := range []string{"delete", "by_id", "batch"} {
 		t.Run(operation, func(t *testing.T) {
 			truncateTables(t)
@@ -341,7 +341,7 @@ func TestManagedTokenRevocationCacheErrorsFailClosed(t *testing.T) {
 	})
 }
 
-func TestGetXCodeSessionTokenAuthoritativeLookup(t *testing.T) {
+func TestGetZenSessionTokenAuthoritativeLookup(t *testing.T) {
 	for _, mutation := range []string{"none", "disabled", "deleted", "wrong_user", "wrong_session_purpose", "wrong_key_purpose", "sid_mismatch", "revoked", "deny_fence", "expired_session", "expired_key", "unbounded", "beyond_session", "finite_quota", "routing", "duplicate", "deleted_duplicate"} {
 		t.Run(mutation, func(t *testing.T) {
 			truncateTables(t)
@@ -389,13 +389,13 @@ func TestGetXCodeSessionTokenAuthoritativeLookup(t *testing.T) {
 					require.NoError(t, DB.Delete(&token).Error)
 				}
 			}
-			got, err := GetXCodeSessionToken(7, token.ClientSessionSID)
+			got, err := GetZenSessionToken(7, token.ClientSessionSID)
 			if mutation == "none" {
 				require.NoError(t, err)
 				assert.Equal(t, token.Id, got.Id)
 				return
 			}
-			require.ErrorIs(t, err, ErrXCodeManagedTokenInvalid)
+			require.ErrorIs(t, err, ErrZenManagedTokenInvalid)
 			assert.Nil(t, got)
 		})
 	}
@@ -403,9 +403,9 @@ func TestGetXCodeSessionTokenAuthoritativeLookup(t *testing.T) {
 		original := DB
 		DB = DB.Session(&gorm.Session{}).WithContext(canceledTokenTestContext())
 		t.Cleanup(func() { DB = original })
-		_, err := GetXCodeSessionToken(7, "managed-session")
+		_, err := GetZenSessionToken(7, "managed-session")
 		require.Error(t, err)
-		assert.NotErrorIs(t, err, ErrXCodeManagedTokenInvalid)
+		assert.NotErrorIs(t, err, ErrZenManagedTokenInvalid)
 	})
 }
 
@@ -443,17 +443,17 @@ func TestManagedTokenCannotRecreateDeletedCredential(t *testing.T) {
 	replacement := token
 	replacement.Id = 0
 	replacement.Key = "replacement"
-	require.ErrorIs(t, replacement.Insert(), ErrXCodeManagedTokenInvalid)
+	require.ErrorIs(t, replacement.Insert(), ErrZenManagedTokenInvalid)
 	require.NoError(t, token.Delete())
-	require.ErrorIs(t, replacement.Insert(), ErrXCodeManagedTokenInvalid)
+	require.ErrorIs(t, replacement.Insert(), ErrZenManagedTokenInvalid)
 	// Even an incorrectly restored SID cannot authorize another key for that SID.
 	require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", token.ClientSessionSID).Updates(map[string]any{
 		"status": UserSessionStatusActive, "revoked_at": 0,
 	}).Error)
-	require.ErrorIs(t, replacement.Insert(), ErrXCodeManagedTokenInvalid)
+	require.ErrorIs(t, replacement.Insert(), ErrZenManagedTokenInvalid)
 }
 
-func TestManagedTokenCreationRequiresLiveXCodeSession(t *testing.T) {
+func TestManagedTokenCreationRequiresLiveZenSession(t *testing.T) {
 	for _, field := range []string{"missing", "purpose", "revoked", "expired"} {
 		t.Run(field, func(t *testing.T) {
 			truncateTables(t)
@@ -468,7 +468,7 @@ func TestManagedTokenCreationRequiresLiveXCodeSession(t *testing.T) {
 			case "expired":
 				require.NoError(t, DB.Model(&UserSession{}).Where("sid = ?", token.ClientSessionSID).Update("expires_at", time.Now().Unix()).Error)
 			}
-			require.ErrorIs(t, DB.Create(&token).Error, ErrXCodeManagedTokenInvalid)
+			require.ErrorIs(t, DB.Create(&token).Error, ErrZenManagedTokenInvalid)
 		})
 	}
 }
@@ -480,7 +480,7 @@ func TestManagedTokenUsageAccountingKeepsCredential(t *testing.T) {
 	reserved, err := TryReserveTokenQuota(token.Id, token.Key, 7, true)
 	require.NoError(t, err)
 	require.True(t, reserved)
-	current, err := GetXCodeSessionToken(7, token.ClientSessionSID)
+	current, err := GetZenSessionToken(7, token.ClientSessionSID)
 	require.NoError(t, err)
 	assert.Equal(t, -7, current.RemainQuota, "native unlimited-key accounting is not an independent budget")
 	assert.Equal(t, 7, current.UsedQuota)
@@ -512,7 +512,7 @@ func TestManagedTokenRenamePreservesConcurrentUsageAccounting(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, DB.Callback().Update().Remove(callback)) })
 	token.Name = "renamed-during-consumption"
 	require.NoError(t, token.Update())
-	current, err := GetXCodeSessionToken(token.UserId, token.ClientSessionSID)
+	current, err := GetZenSessionToken(token.UserId, token.ClientSessionSID)
 	require.NoError(t, err)
 	assert.Equal(t, token.Name, current.Name)
 	assert.Equal(t, -7, current.RemainQuota)

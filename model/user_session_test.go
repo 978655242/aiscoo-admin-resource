@@ -96,19 +96,19 @@ func newTestUserSession(sid string, userID int, now int64) *UserSession {
 	}
 }
 
-func createTestXCodeManagedToken(t *testing.T, session *UserSession, key string) *Token {
+func createTestZenManagedToken(t *testing.T, session *UserSession, key string) *Token {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(&Token{}))
 	token := &Token{
 		UserId:           session.UserID,
 		Key:              key,
 		Status:           common.TokenStatusEnabled,
-		Name:             "XCode managed key",
+		Name:             "aiscoo zen managed key",
 		CreatedTime:      session.CreatedAt,
 		AccessedTime:     session.CreatedAt,
 		ExpiredTime:      session.ExpiresAt,
 		UnlimitedQuota:   true,
-		ClientPurpose:    ClientPurposeXCode,
+		ClientPurpose:    ClientPurposeZen,
 		ClientSessionSID: session.SID,
 	}
 	require.NoError(t, DB.Create(token).Error)
@@ -287,16 +287,16 @@ func TestUserSessionCreateListAndRevokeOne(t *testing.T) {
 	assert.Equal(t, second.SID, active.SID)
 }
 
-func TestRevokeUserSessionDisablesBoundXCodeManagedKey(t *testing.T) {
+func TestRevokeUserSessionDisablesBoundZenManagedKey(t *testing.T) {
 	setupUserSessionTest(t)
 	require.NoError(t, DB.AutoMigrate(&Token{}))
 	now := time.Now().Unix()
 	createUserSessionTestUser(t, 1012, 1)
 	session := newTestUserSession("revoke-xcode-managed-key", 1012, now)
-	session.ClientPurpose = ClientPurposeXCode
+	session.ClientPurpose = ClientPurposeZen
 	session.LoginMethod = "xcode_pkce"
 	require.NoError(t, CreateUserSession(session))
-	token := createTestXCodeManagedToken(t, session, "revoke-xcode-managed-key")
+	token := createTestZenManagedToken(t, session, "revoke-xcode-managed-key")
 
 	revoked, err := RevokeUserSession(session.UserID, session.SID, "user_revoked")
 	require.NoError(t, err)
@@ -310,10 +310,10 @@ func TestRotateUserSessionRefreshRaceAndReuse(t *testing.T) {
 	now := time.Now().Unix()
 	createUserSessionTestUser(t, 1002, 1)
 	session := newTestUserSession("rotate-session", 1002, now)
-	session.ClientPurpose = ClientPurposeXCode
+	session.ClientPurpose = ClientPurposeZen
 	session.LoginMethod = "xcode_pkce"
 	require.NoError(t, CreateUserSession(session))
-	token := createTestXCodeManagedToken(t, session, "rotate-xcode-managed-key")
+	token := createTestZenManagedToken(t, session, "rotate-xcode-managed-key")
 
 	rotated, err := RotateUserSessionRefresh(1002, session.SID, session.RefreshHash, "next-hash", now+10, 30*time.Second)
 	require.NoError(t, err)
@@ -409,19 +409,19 @@ func TestRevokeOtherUserSessionsKeepsCurrent(t *testing.T) {
 	now := time.Now().Unix()
 	createUserSessionTestUser(t, 1003, 1)
 	createUserSessionTestUser(t, 1004, 1)
-	var xcodeToken *Token
+	var zenToken *Token
 	for _, sid := range []string{"current-session", "other-one", "other-two"} {
 		session := newTestUserSession(sid, 1003, now)
 		if sid == "other-one" {
 			session.UserAuthVersion = 99
 		}
 		if sid == "other-two" {
-			session.ClientPurpose = ClientPurposeXCode
+			session.ClientPurpose = ClientPurposeZen
 			session.LoginMethod = "xcode_pkce"
 		}
 		require.NoError(t, CreateUserSession(session))
 		if sid == "other-two" {
-			xcodeToken = createTestXCodeManagedToken(t, session, "bulk-revoke-xcode-managed-key")
+			zenToken = createTestZenManagedToken(t, session, "bulk-revoke-xcode-managed-key")
 		}
 	}
 	require.NoError(t, CreateUserSession(newTestUserSession("different-user", 1004, now)))
@@ -438,8 +438,8 @@ func TestRevokeOtherUserSessionsKeepsCurrent(t *testing.T) {
 	stale, err := GetUserSessionBySID("other-one")
 	require.NoError(t, err)
 	assert.Equal(t, UserSessionStatusRevoked, stale.Status, "revocation must include active sessions from stale auth versions")
-	require.NoError(t, DB.Unscoped().First(xcodeToken, xcodeToken.Id).Error)
-	assert.Equal(t, common.TokenStatusDisabled, xcodeToken.Status)
+	require.NoError(t, DB.Unscoped().First(zenToken, zenToken.Id).Error)
+	assert.Equal(t, common.TokenStatusDisabled, zenToken.Status)
 	different, err := GetUserSessionCached("different-user")
 	require.NoError(t, err)
 	assert.Equal(t, 1004, different.UserID)

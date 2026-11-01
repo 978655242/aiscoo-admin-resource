@@ -25,7 +25,7 @@ import { z } from 'zod'
 function displayTextValid(value: string, maxCodePoints: number): boolean {
   if (value.trim() === '') return false
   let count = 0
-  // XCODE: Go 按 Unicode code point 校验；UTF-16 length 会把合法 emoji 边界拒绝为整页无效。
+  // ZEN: Go 按 Unicode code point 校验；UTF-16 length 会把合法 emoji 边界拒绝为整页无效。
   for (let index = 0; index < value.length; index++) {
     if (++count > maxCodePoints) return false
     const codePoint = value.codePointAt(index)
@@ -34,8 +34,8 @@ function displayTextValid(value: string, maxCodePoints: number): boolean {
   return true
 }
 
-// XCODE: display metadata is presentation-only and remains separate from plan economics.
-export const xcodePlanDisplaySchema = z
+// ZEN: display metadata is presentation-only and remains separate from plan economics.
+export const zenPlanDisplaySchema = z
   .object({
     group_key: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
     group_title: z.string().refine((value) => displayTextValid(value, 128)),
@@ -49,7 +49,7 @@ export const xcodePlanDisplaySchema = z
   })
   .strict()
 
-export type XCodePlanDisplay = z.infer<typeof xcodePlanDisplaySchema>
+export type ZenPlanDisplay = z.infer<typeof zenPlanDisplaySchema>
 
 export const subscriptionPlanSchema = z.object({
   id: z.number(),
@@ -73,7 +73,7 @@ export const subscriptionPlanSchema = z.object({
   stripe_price_id: z.string().optional(),
   creem_product_id: z.string().optional(),
   waffo_pancake_product_id: z.string().optional(),
-  xcode_display: xcodePlanDisplaySchema.nullable().optional(),
+  xcode_display: zenPlanDisplaySchema.nullable().optional(),
 })
 
 export type SubscriptionPlan = z.infer<typeof subscriptionPlanSchema>
@@ -165,38 +165,38 @@ export interface SubscriptionResetResult {
   advance_reset_time: boolean
 }
 
-const xcodeDecimalSchema = z.string().regex(/^(0|[1-9]\d*)$/)
-const xcodeTimestampSchema = z.number().int().safe().nonnegative().nullable()
+const zenDecimalSchema = z.string().regex(/^(0|[1-9]\d*)$/)
+const zenTimestampSchema = z.number().int().safe().nonnegative().nullable()
 
-export const xcodeAuthorizationSnapshotSchema = z.object({
+export const zenAuthorizationSnapshotSchema = z.object({
   schema_version: z.literal(1),
   server_time: z.number().int().safe().nonnegative(),
   status: z.enum(['unassigned', 'active', 'exhausted', 'expired', 'revoked']),
-  authorization_revision: xcodeDecimalSchema,
+  authorization_revision: zenDecimalSchema,
   subscription: z
     .object({
-      id: xcodeDecimalSchema,
-      plan_id: xcodeDecimalSchema,
+      id: zenDecimalSchema,
+      plan_id: zenDecimalSchema,
       plan_title: z.string(),
       source: z.literal('admin'),
-      usage_scope: z.literal('xcode'),
-      start_time: xcodeTimestampSchema,
-      end_time: xcodeTimestampSchema,
+      usage_scope: z.literal('zen'),
+      start_time: zenTimestampSchema,
+      end_time: zenTimestampSchema,
     })
     .nullable(),
   quota: z
     .object({
-      scope: z.literal('xcode-subscription'),
+      scope: z.literal('zen-subscription'),
       unit: z.literal('quota'),
       unlimited: z.boolean(),
-      total: xcodeDecimalSchema.nullable(),
-      used: xcodeDecimalSchema,
-      remaining: xcodeDecimalSchema.nullable(),
+      total: zenDecimalSchema.nullable(),
+      used: zenDecimalSchema,
+      remaining: zenDecimalSchema.nullable(),
       used_percentage: z.number().finite().nonnegative().nullable(),
       reset_period: z.enum(['never', 'daily', 'weekly', 'monthly', 'custom']),
-      reset_custom_seconds: xcodeDecimalSchema,
-      last_reset_time: xcodeTimestampSchema,
-      next_reset_time: xcodeTimestampSchema,
+      reset_custom_seconds: zenDecimalSchema,
+      last_reset_time: zenTimestampSchema,
+      next_reset_time: zenTimestampSchema,
       reset_time_zone: z.string(),
       reset_utc_offset_seconds: z.number().int(),
     })
@@ -210,11 +210,11 @@ export const xcodeAuthorizationSnapshotSchema = z.object({
   purchase_mode: z.literal('manual_admin'),
 })
 
-export type XCodeAuthorizationSnapshot = z.infer<
-  typeof xcodeAuthorizationSnapshotSchema
+export type ZenAuthorizationSnapshot = z.infer<
+  typeof zenAuthorizationSnapshotSchema
 >
 
-export type XCodeAuthorizationRequest =
+export type ZenAuthorizationRequest =
   | {
       action: 'grant' | 'renew' | 'replace'
       expected_revision: string

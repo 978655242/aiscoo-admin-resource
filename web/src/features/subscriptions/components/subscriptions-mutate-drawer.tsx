@@ -159,7 +159,7 @@ export function SubscriptionsMutateDrawer({
 
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
-  const xcodeDisplay = form.watch('xcode_display')
+  const zenDisplay = form.watch('xcode_display')
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
   const watchedTitle = form.watch('title')
   const watchedPrice = form.watch('price_amount')
@@ -579,7 +579,7 @@ export function SubscriptionsMutateDrawer({
               </div>
             </SideDrawerSection>
 
-            {/* XCODE: this edits presentation metadata only; native price and quota fields remain authoritative. */}
+            {/* ZEN: this edits presentation metadata only; native price and quota fields remain authoritative. */}
             <SideDrawerSection>
               <h3 className='flex items-center gap-2 text-sm font-medium'>
                 <IconBadge tone='chart-4' size='xs'>
@@ -594,7 +594,7 @@ export function SubscriptionsMutateDrawer({
                 </FormLabel>
                 <FormControl>
                   <Switch
-                    checked={xcodeDisplay !== null}
+                    checked={zenDisplay !== null}
                     onCheckedChange={(checked) =>
                       form.setValue(
                         'xcode_display',
@@ -614,7 +614,7 @@ export function SubscriptionsMutateDrawer({
                 </FormControl>
               </FormItem>
 
-              {xcodeDisplay !== null ? (
+              {zenDisplay !== null ? (
                 <>
                   <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                     <FormField
