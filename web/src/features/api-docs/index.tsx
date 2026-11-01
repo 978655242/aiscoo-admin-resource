@@ -22,6 +22,14 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -79,9 +87,9 @@ export function ApiDocs(props: { page?: string }) {
 
   return (
     <PublicLayout showMainContainer={false} showNotifications={false}>
-      <div className='mx-auto max-w-[1440px] px-4 pt-20 sm:px-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-10 xl:grid-cols-[220px_minmax(0,1fr)_180px] xl:gap-12'>
+      <div className='mx-auto max-w-[1440px] px-4 pt-28 sm:px-6 lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start lg:gap-10 lg:pt-32 xl:grid-cols-[220px_minmax(0,1fr)_180px] xl:gap-12'>
         <aside
-          className='lg:sticky lg:top-24 lg:max-h-[calc(100svh-7rem)] lg:overflow-y-auto lg:pb-8'
+          className='lg:sticky lg:top-32 lg:max-h-[calc(100svh-10rem)] lg:overflow-y-auto lg:pb-8'
           aria-label={t('API documentation navigation')}
         >
           <Collapsible open={desktop || menuOpen} onOpenChange={setMenuOpen}>
@@ -141,13 +149,23 @@ export function ApiDocs(props: { page?: string }) {
         </aside>
         <main id='content' className='min-w-0 pb-16' key={pageId}>
           <header className='mb-8 space-y-4 border-b pb-7'>
-            <p className='text-muted-foreground text-sm'>
-              {t('Docs')}{' '}
-              <span aria-hidden='true' className='px-2'>
-                /
-              </span>{' '}
-              {t('Model API reference')}
-            </p>
+            <Breadcrumb aria-label={t('Docs')}>
+              <BreadcrumbList className='gap-x-2 gap-y-1.5'>
+                <BreadcrumbItem>
+                  <BreadcrumbLink render={<Link to='/docs' />}>
+                    {t('Docs')}
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                <BreadcrumbItem>{t(page.group)}</BreadcrumbItem>
+                <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                <BreadcrumbItem className='min-w-0'>
+                  <BreadcrumbPage className='break-words'>
+                    {t(page.title)}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
             <h1 className='text-3xl font-semibold tracking-tight'>
               {t(page.title)}
             </h1>
@@ -195,7 +213,7 @@ export function ApiDocs(props: { page?: string }) {
           </nav>
         </main>
         <aside
-          className='sticky top-24 hidden self-start border-l pl-5 xl:block'
+          className='sticky top-32 hidden self-start border-l pl-5 xl:block'
           aria-label={t('On this page')}
         >
           <p className='mb-4 text-xs font-semibold'>{t('On this page')}</p>

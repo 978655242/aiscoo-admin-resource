@@ -157,6 +157,65 @@ test('mobile directory supports keyboard expansion, internal navigation, and clo
   ).toHaveAttribute('aria-current', 'page')
 })
 
+test.each([
+  ['chat-completions', 'Text and multimodal', 'Chat Completions'],
+  ['images', 'Media and utilities', 'Images'],
+  ['errors', 'API basics', 'Errors and retries'],
+])(
+  'opening %s shows its category and title in the breadcrumb',
+  async (page, group, title) => {
+    renderPage(`/docs/${page}`)
+    const breadcrumb = await screen.findByRole('navigation', { name: 'Docs' })
+    expect(within(breadcrumb).getByText(group)).toBeVisible()
+    expect(
+      within(breadcrumb).getByRole('link', { name: title, current: 'page' })
+    ).toBeVisible()
+    expect(
+      within(breadcrumb).getByRole('link', { name: 'Docs' })
+    ).toHaveAttribute('href', '/docs')
+  }
+)
+
+test('navigating between documents updates the breadcrumb and its docs link returns to the overview', async () => {
+  const user = userEvent.setup()
+  renderPage('/docs/chat-completions')
+  await screen.findByRole('heading', { name: 'Chat Completions', level: 1 })
+  await user.click(
+    within(
+      screen.getByRole('navigation', { name: 'Documentation pages' })
+    ).getByRole('link', { name: /Next page\s*Responses/ })
+  )
+  const breadcrumb = await screen.findByRole('navigation', { name: 'Docs' })
+  expect(
+    within(breadcrumb).getByRole('link', { name: 'Responses', current: 'page' })
+  ).toBeVisible()
+  expect(
+    within(breadcrumb).queryByText('Chat Completions')
+  ).not.toBeInTheDocument()
+  await user.click(within(breadcrumb).getByRole('link', { name: 'Docs' }))
+  expect(
+    await screen.findByRole('heading', { name: 'API overview', level: 1 })
+  ).toBeVisible()
+  expect(
+    within(screen.getByRole('navigation', { name: 'Docs' })).getByRole('link', {
+      name: 'API overview',
+      current: 'page',
+    })
+  ).toBeVisible()
+})
+
+test('document layout reserves space below the fixed header and aligns sticky directories', async () => {
+  renderPage()
+  const main = await screen.findByRole('main')
+  expect(main.parentElement).toHaveClass('pt-28', 'lg:pt-32', 'lg:items-start')
+  expect(
+    screen.getByRole('complementary', { name: 'API documentation navigation' })
+  ).toHaveClass('lg:top-32', 'lg:max-h-[calc(100svh-10rem)]')
+  expect(
+    screen.getByRole('complementary', { name: 'On this page' })
+  ).toHaveClass('top-32')
+})
+
 test('example tabs switch language by keyboard and copy code using the current origin and port', async () => {
   const user = userEvent.setup()
   const copy = vi.fn().mockResolvedValue(undefined)
