@@ -328,7 +328,7 @@ export function UserSubscriptionsDialog(props: Props) {
               <Combobox
                 options={plans.map((p) => ({
                   value: String(p.plan.id),
-                  label: `${p.plan.title} ($${Number(p.plan.price_amount || 0).toFixed(2)})`,
+                  label: `${p.plan.title} (${p.plan.currency === 'CNY' ? '¥' : '$'}${Number(p.plan.price_amount || 0).toFixed(2)})`,
                 }))}
                 value={selectedPlanId}
                 onValueChange={(v) => v !== null && setSelectedPlanId(v)}

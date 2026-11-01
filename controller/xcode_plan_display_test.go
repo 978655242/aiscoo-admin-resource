@@ -228,4 +228,46 @@ func TestXCodePlanDisplayPersistenceAndWebProjection(t *testing.T) {
 	clearedStored, err := model.GetSubscriptionPlanById(reloaded.Id)
 	require.NoError(t, err)
 	assert.Nil(t, clearedStored.XCodeDisplay)
+
+	cny := call(AdminCreateSubscriptionPlan, http.MethodPost, "/api/subscription/admin/plans", map[string]any{
+		"plan": map[string]any{
+			"title": "CNY plan", "price_amount": 30, "currency": "CNY",
+			"duration_unit": "day", "duration_value": 31, "enabled": true,
+			"max_purchase_per_user": 0, "total_amount": 2054795, "quota_reset_period": "never",
+		},
+	})
+	require.Equal(t, http.StatusOK, cny.Code, cny.Body.String())
+	var cnyCreated struct {
+		Data model.SubscriptionPlan `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(cny.Body.Bytes(), &cnyCreated))
+	assert.Equal(t, "CNY", cnyCreated.Data.Currency)
+
+	// An update without a currency keeps CNY; an unsupported currency falls back to USD on create.
+	retitled := call(AdminUpdateSubscriptionPlan, http.MethodPut,
+		fmt.Sprintf("/api/subscription/admin/plans/%d", cnyCreated.Data.Id), map[string]any{
+			"plan": map[string]any{
+				"title": "CNY plan renamed", "price_amount": 30, "duration_unit": "day", "duration_value": 31,
+				"enabled": true, "max_purchase_per_user": 0, "total_amount": 2054795, "quota_reset_period": "never",
+			},
+		})
+	require.Equal(t, http.StatusOK, retitled.Code, retitled.Body.String())
+	kept, err := model.GetSubscriptionPlanById(cnyCreated.Data.Id)
+	require.NoError(t, err)
+	assert.Equal(t, "CNY", kept.Currency)
+	assert.Equal(t, "CNY plan renamed", kept.Title)
+
+	other := call(AdminCreateSubscriptionPlan, http.MethodPost, "/api/subscription/admin/plans", map[string]any{
+		"plan": map[string]any{
+			"title": "EUR plan", "price_amount": 5, "currency": "EUR",
+			"duration_unit": "month", "duration_value": 1, "enabled": true,
+			"max_purchase_per_user": 0, "total_amount": 500000, "quota_reset_period": "never",
+		},
+	})
+	require.Equal(t, http.StatusOK, other.Code, other.Body.String())
+	var otherCreated struct {
+		Data model.SubscriptionPlan `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(other.Body.Bytes(), &otherCreated))
+	assert.Equal(t, "USD", otherCreated.Data.Currency)
 }
