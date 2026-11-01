@@ -190,34 +190,3 @@ export async function getModuleAccessForGuard(
     return { enabled: false, requireAuth: true }
   }
 }
-
-/**
- * Whether an admin sidebar entry is enabled by `SidebarModulesAdmin`.
- *
- * Fails open: an absent, blank, or unparsable configuration keeps every module
- * visible, so a status read that has not landed yet cannot blank the sidebar.
- */
-export function isSidebarModuleEnabled(
-  section: string,
-  module: string
-): boolean {
-  const status = readCachedStatus()
-  if (!status) return true
-
-  const raw = status.SidebarModulesAdmin
-  if (!raw || String(raw).trim() === '') return true
-
-  try {
-    const parsed = JSON.parse(String(raw)) as Record<
-      string,
-      Record<string, boolean>
-    >
-    const sectionConfig = parsed[section]
-    if (!sectionConfig) return true
-    if (sectionConfig.enabled === false) return false
-    if (sectionConfig[module] === false) return false
-    return true
-  } catch {
-    return true
-  }
-}

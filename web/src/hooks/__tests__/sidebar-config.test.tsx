@@ -154,20 +154,26 @@ describe('audit log sidebar entry', () => {
 })
 
 describe('chat sidebar group', () => {
-  it('legacy configurations that enable chat presets show only Playground', () => {
-    const legacy = { chat: { enabled: true, playground: true, chat: true } }
-    const { result } = sidebarFor(legacy)
-    expect(
-      result.current
-        .find((group) => group.id === 'chat')
-        ?.items.map((item) => item.title)
-    ).toEqual(['Playground'])
-  })
+  it.each([
+    undefined,
+    { chat: { enabled: true, playground: true, chat: true } },
+  ])(
+    'Playground stays hidden even when the configuration enables it (%j)',
+    (admin) => {
+      const { result } = sidebarFor(admin)
+      expect(result.current.some((group) => group.id === 'chat')).toBe(false)
+      expect(
+        result.current
+          .flatMap((group) => group.items)
+          .some((item) => item.title === 'Playground')
+      ).toBe(false)
+    }
+  )
 
-  it('admin settings drop the removed chat presets toggle from legacy configurations', () => {
+  it('admin settings drop the removed chat area from legacy configurations', () => {
     const config = parseSidebarModulesAdmin(
-      '{"chat":{"enabled":true,"playground":false,"chat":true}}'
+      '{"chat":{"enabled":true,"playground":true,"chat":true}}'
     )
-    expect(config.chat).toEqual({ enabled: true, playground: false })
+    expect(config.chat).toBeUndefined()
   })
 })
