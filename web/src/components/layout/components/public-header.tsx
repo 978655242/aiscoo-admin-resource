@@ -95,6 +95,8 @@ export function PublicHeader(props: PublicHeaderProps) {
   const showWordmark =
     systemLogo === DEFAULT_LOGO && systemName === DEFAULT_SYSTEM_NAME
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const consoleLink = links.find((link) => link.href === '/dashboard')
+  const centerLinks = links.filter((link) => link !== consoleLink)
 
   let logoContent: ReactNode = (
     <HeaderLogo
@@ -241,8 +243,8 @@ export function PublicHeader(props: PublicHeaderProps) {
             </div>
 
             {/* Desktop nav */}
-            <div className='hidden min-w-0 items-center gap-0.5 lg:flex'>
-              {links.map((link) => {
+            <div className='hidden min-w-0 items-center justify-center gap-0.5 lg:flex'>
+              {centerLinks.map((link) => {
                 const isActive = pathname === link.href
                 if (link.external) {
                   return (
@@ -283,13 +285,10 @@ export function PublicHeader(props: PublicHeaderProps) {
                   </Link>
                 )
               })}
+            </div>
 
-              {(showLanguageSwitcher ||
-                showThemeSwitch ||
-                showNotifications) && (
-                <div className='bg-border/40 mx-2 h-4 w-px' />
-              )}
-
+            {/* Desktop actions */}
+            <div className='hidden min-w-0 flex-1 items-center justify-end gap-0.5 lg:flex'>
               {showLanguageSwitcher && <LanguageSwitcher />}
               {showThemeSwitch && <ThemeSwitch />}
               {showNotifications && (
@@ -303,6 +302,24 @@ export function PublicHeader(props: PublicHeaderProps) {
                   announcements={notifications.announcements}
                   loading={notifications.loading}
                 />
+              )}
+
+              {consoleLink && (
+                <Button
+                  size='sm'
+                  className='ml-2 h-8 rounded-lg px-3.5 text-xs font-medium'
+                  disabled={consoleLink.disabled}
+                  render={
+                    <Link
+                      to={consoleLink.href}
+                      onClick={(event) =>
+                        handleNavLinkClick(event, consoleLink)
+                      }
+                    />
+                  }
+                >
+                  {t(consoleLink.title)}
+                </Button>
               )}
 
               {showAuthButtons && (
