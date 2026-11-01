@@ -62,7 +62,7 @@ export function PerformanceHealthPanel() {
 
   return (
     <section className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
-      <div className='flex items-center gap-2 border-b px-4 py-3 sm:px-5'>
+      <div className='flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-3 sm:px-5'>
         <IconBadge tone='success' size='sm'>
           <HeartPulse />
         </IconBadge>

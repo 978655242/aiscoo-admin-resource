@@ -42,7 +42,9 @@ const DEFAULT_STATUS_COLOR = 'bg-muted-foreground/40'
 
 const StatusDot = memo(function StatusDot(props: { status: number }) {
   const color = STATUS_COLOR_MAP[props.status] ?? DEFAULT_STATUS_COLOR
-  return <span className={cn('inline-block size-2 rounded-full', color)} />
+  return (
+    <span className={cn('inline-block size-2 shrink-0 rounded-full', color)} />
+  )
 })
 
 export function UptimePanel() {
@@ -108,7 +110,7 @@ export function UptimePanel() {
       loading={loading}
       empty={!groups.length}
       emptyMessage={t('No uptime monitoring configured')}
-      height='h-80'
+      height='h-32'
       contentClassName='p-0'
       headerActions={
         <Button
@@ -117,15 +119,16 @@ export function UptimePanel() {
           onClick={handleRefresh}
           disabled={refreshing}
           className='size-7 p-0'
+          aria-label={t('Refresh')}
         >
           <RotateCw
             className={cn('size-3.5', refreshing && 'animate-spin')}
-            aria-label={t('Refresh')}
+            aria-hidden='true'
           />
         </Button>
       }
     >
-      <ScrollArea className='h-80'>
+      <ScrollArea className='max-h-80 [&_[data-slot=scroll-area-viewport]]:max-h-80'>
         <div>
           {groups.map((group, groupIdx) => (
             <div key={group.categoryName}>

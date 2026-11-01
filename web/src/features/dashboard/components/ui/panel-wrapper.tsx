@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
@@ -37,12 +37,15 @@ interface PanelWrapperProps {
 
 function PanelHeader(props: {
   title: ReactNode
+  titleId: string
   description?: ReactNode
   actions?: ReactNode
 }) {
   const heading = (
-    <div className='flex flex-col gap-1'>
-      <div className='text-sm font-semibold'>{props.title}</div>
+    <div className='flex min-w-0 flex-col gap-1'>
+      <h3 id={props.titleId} className='text-sm font-semibold'>
+        {props.title}
+      </h3>
       {props.description != null && (
         <div className='text-muted-foreground text-xs'>{props.description}</div>
       )}
@@ -65,6 +68,7 @@ function PanelHeader(props: {
 
 export function PanelWrapper(props: PanelWrapperProps) {
   const { t } = useTranslation()
+  const titleId = useId()
   const resolvedEmptyMessage = props.emptyMessage ?? t('No data available')
   const height = props.height ?? 'h-64'
   const frameClassName = cn(
@@ -74,19 +78,27 @@ export function PanelWrapper(props: PanelWrapperProps) {
 
   if (props.loading) {
     return (
-      <div className={frameClassName}>
-        <PanelHeader title={props.title} description={props.description} />
+      <section aria-labelledby={titleId} className={frameClassName}>
+        <PanelHeader
+          titleId={titleId}
+          title={props.title}
+          description={props.description}
+        />
         <div className={cn('p-4 sm:p-5', props.contentClassName)}>
           <Skeleton className={`w-full ${height}`} />
         </div>
-      </div>
+      </section>
     )
   }
 
   if (props.empty) {
     return (
-      <div className={frameClassName}>
-        <PanelHeader title={props.title} description={props.description} />
+      <section aria-labelledby={titleId} className={frameClassName}>
+        <PanelHeader
+          titleId={titleId}
+          title={props.title}
+          description={props.description}
+        />
         <div
           className={cn(
             'text-muted-foreground flex items-center justify-center px-4 text-sm',
@@ -96,13 +108,14 @@ export function PanelWrapper(props: PanelWrapperProps) {
         >
           {resolvedEmptyMessage}
         </div>
-      </div>
+      </section>
     )
   }
 
   return (
-    <div className={frameClassName}>
+    <section aria-labelledby={titleId} className={frameClassName}>
       <PanelHeader
+        titleId={titleId}
         title={props.title}
         description={props.description}
         actions={props.headerActions}
@@ -110,6 +123,6 @@ export function PanelWrapper(props: PanelWrapperProps) {
       <div className={cn('p-4 sm:p-5', props.contentClassName)}>
         {props.children}
       </div>
-    </div>
+    </section>
   )
 }

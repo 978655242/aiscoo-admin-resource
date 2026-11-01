@@ -613,9 +613,9 @@ export function OverviewDashboard() {
   const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
   const setupGuideExpanded =
     manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
-  const showLeftContentPanels =
-    isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
-  const showContentPanels = showLeftContentPanels || showUptimePanel
+  const showServicePanels = isAdmin || showApiInfoPanel || showUptimePanel
+  const showUpdatesPanels = showAnnouncementsPanel || showFAQPanel
+  const showContentPanels = showServicePanels || showUpdatesPanels
 
   const handleSetupGuideToggle = () => {
     const nextExpanded = !setupGuideExpanded
@@ -648,7 +648,7 @@ export function OverviewDashboard() {
         <div className='flex flex-col gap-4'>
           <div id={setupGuideId} hidden={!setupGuideExpanded}>
             {setupGuideExpanded && (
-              <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
+              <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]'>
                 <CardStaggerItem className='dark h-full overflow-hidden rounded-2xl border border-[rgba(204,238,244,0.17)] bg-[#09131f] text-[#f5f8fa] shadow-[0_14px_40px_rgba(4,40,47,0.25)]'>
                   <div className='relative isolate h-full overflow-hidden p-4 sm:p-5'>
                     <div
@@ -802,48 +802,44 @@ export function OverviewDashboard() {
           {showContentPanels && (
             <CardStaggerContainer
               className={cn(
-                'grid grid-cols-1 gap-4',
-                showLeftContentPanels &&
-                  showUptimePanel &&
-                  'xl:grid-cols-[minmax(0,1fr)_22rem]'
+                'grid grid-cols-1 items-start gap-4',
+                showServicePanels &&
+                  showUpdatesPanels &&
+                  'xl:grid-cols-[minmax(0,1fr)_20rem]'
               )}
             >
-              {showLeftContentPanels && (
-                <div
-                  className={cn(
-                    'grid min-w-0 grid-cols-1 gap-4',
-                    (showApiInfoPanel ||
-                      showAnnouncementsPanel ||
-                      showFAQPanel) &&
-                      'lg:grid-cols-2'
-                  )}
-                >
+              {showServicePanels && (
+                <div className='flex min-w-0 flex-col gap-4'>
                   {isAdmin && (
-                    <CardStaggerItem className='lg:col-span-2'>
+                    <CardStaggerItem className='min-w-0'>
                       <PerformanceHealthPanel />
                     </CardStaggerItem>
                   )}
                   {showApiInfoPanel && (
-                    <CardStaggerItem>
+                    <CardStaggerItem className='min-w-0'>
                       <ApiInfoPanel />
                     </CardStaggerItem>
                   )}
-                  {showAnnouncementsPanel && (
-                    <CardStaggerItem>
-                      <AnnouncementsPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showFAQPanel && (
-                    <CardStaggerItem>
-                      <FAQPanel />
+                  {showUptimePanel && (
+                    <CardStaggerItem className='min-w-0'>
+                      <UptimePanel />
                     </CardStaggerItem>
                   )}
                 </div>
               )}
-              {showUptimePanel && (
-                <CardStaggerItem>
-                  <UptimePanel />
-                </CardStaggerItem>
+              {showUpdatesPanels && (
+                <div className='flex min-w-0 flex-col gap-4'>
+                  {showAnnouncementsPanel && (
+                    <CardStaggerItem className='min-w-0'>
+                      <AnnouncementsPanel />
+                    </CardStaggerItem>
+                  )}
+                  {showFAQPanel && (
+                    <CardStaggerItem className='min-w-0'>
+                      <FAQPanel />
+                    </CardStaggerItem>
+                  )}
+                </div>
               )}
             </CardStaggerContainer>
           )}

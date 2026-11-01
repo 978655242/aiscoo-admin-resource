@@ -52,8 +52,8 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
         />
 
         <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <div className='flex items-baseline gap-2'>
-            <span className='font-mono text-sm font-semibold'>
+          <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+            <span className='min-w-0 font-mono text-sm font-semibold break-all'>
               {item.route}
             </span>
             <span className='text-muted-foreground/60 hidden truncate text-xs md:inline'>
