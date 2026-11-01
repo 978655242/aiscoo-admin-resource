@@ -793,14 +793,14 @@ For commercial licensing, please contact support@quantumnous.com
   --color-primary-foreground: #000000;
 }
 
-/* Auth pages (sign-in, sign-up, XWork authorization) use the official-site palette: mint canvas, white card, deep-teal primary. */
+/* Auth pages (sign-in, sign-up, XWork authorization): cool-white canvas, white card, deep-teal primary. */
 .auth-shell {
-  --background: #eff9f7;
+  --background: #f5f8fa;
   --card: #ffffff;
   --foreground: #153640;
   --muted-foreground: #4a6870;
-  --border: #bcd3d3;
-  --input: #bcd3d3;
+  --border: #e1e7eb;
+  --input: #d9e1e6;
   --primary: #14414b;
   --primary-foreground: #b9f9f8;
   --ring: #137484;
@@ -808,7 +808,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .auth-shell-band {
-  background: linear-gradient(120deg, #d5efed 0%, #e3f3f1 55%, #eff9f7 100%);
+  background: linear-gradient(120deg, #e4ecf1 0%, #edf2f5 55%, #f5f8fa 100%);
 }
 
 .auth-shell input:is([data-slot='input'], [data-slot='form-control']) {
