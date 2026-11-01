@@ -55,11 +55,7 @@ function renderBrandPage(page: 'home' | 'sign-in' | 'footer') {
   client.setQueryData(['status'], { system_name: 'aiscoo' })
   client.setQueryData(['notice'], { success: true, data: '' })
   let content = (
-    <PublicHeader
-      showNotifications={false}
-      showLanguageSwitcher={false}
-      showThemeSwitch={false}
-    />
+    <PublicHeader showNotifications={false} showLanguageSwitcher={false} />
   )
   if (page === 'sign-in') {
     content = (
@@ -132,7 +128,7 @@ test.each(['home', 'sign-in', 'footer'] as const)(
   }
 )
 
-test('configured footer content retains the project attribution', async () => {
+test('configured footer content keeps the aiscoo copyright without upstream names', async () => {
   useSystemConfigStore.getState().setConfig({
     footerHtml: '<p>Research Hub support</p>',
   })

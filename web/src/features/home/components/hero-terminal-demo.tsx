@@ -57,10 +57,10 @@ const ACCENT_CLASSES: Record<
       'bg-amber-500/10 text-amber-600 dark:bg-amber-400/10 dark:text-amber-400',
   },
   blue: {
-    activeText: 'text-blue-600 dark:text-blue-400',
-    activeBorder: 'border-blue-500 dark:border-blue-400',
+    activeText: 'text-cyan-700 dark:text-cyan-500',
+    activeBorder: 'border-cyan-600 dark:border-cyan-500',
     badge:
-      'bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400',
+      'bg-cyan-600/10 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-500',
   },
   violet: {
     activeText: 'text-violet-600 dark:text-violet-400',
@@ -512,13 +512,13 @@ function Command(props: { children: ReactNode }) {
 
 function Flag(props: { children: ReactNode }) {
   return (
-    <span className='text-blue-600 dark:text-blue-400'>{props.children}</span>
+    <span className='text-cyan-700 dark:text-cyan-500'>{props.children}</span>
   )
 }
 
 function Key(props: { children: ReactNode }) {
   return (
-    <span className='text-sky-700 dark:text-sky-300'>{props.children}</span>
+    <span className='text-cyan-700 dark:text-cyan-400'>{props.children}</span>
   )
 }
 

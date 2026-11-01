@@ -24,7 +24,6 @@ import { Dialog } from '@/components/dialog'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
-import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useNotifications } from '@/hooks/use-notifications'
@@ -49,7 +48,6 @@ export interface PublicHeaderProps {
   navLinks?: TopNavLink[]
   mobileLinks?: TopNavLink[]
   navContent?: React.ReactNode
-  showThemeSwitch?: boolean
   showLanguageSwitcher?: boolean
   homeUrl?: string
   leftContent?: React.ReactNode
@@ -65,7 +63,6 @@ export interface PublicHeaderProps {
 export function PublicHeader(props: PublicHeaderProps) {
   const {
     navLinks = defaultTopNavLinks,
-    showThemeSwitch = true,
     showLanguageSwitcher = true,
     homeUrl = '/',
     leftContent,
@@ -76,8 +73,6 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [pageScrolled, setScrolled] = useState(false)
-  const scrolled = pageScrolled && !fullWidth
   const [mobileOpen, setMobileOpen] = useState(false)
   const [authPromptTarget, setAuthPromptTarget] =
     useState<AuthPromptTarget | null>(null)
@@ -119,7 +114,7 @@ export function PublicHeader(props: PublicHeaderProps) {
   let authContent = (
     <Button
       size='sm'
-      className='h-8 rounded-lg px-3.5 text-xs font-medium'
+      className='h-9 rounded-[7px] px-[17px] text-xs font-medium'
       render={<Link to='/sign-in' />}
     >
       {t('Sign in')}
@@ -127,13 +122,6 @@ export function PublicHeader(props: PublicHeaderProps) {
   )
   if (isAuthenticated) authContent = <ProfileDropdown />
   if (loading) authContent = <Skeleton className='h-8 w-20 rounded-lg' />
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20)
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : ''
@@ -205,22 +193,14 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   return (
     <>
-      <header className='pointer-events-none fixed inset-x-0 top-0 z-50'>
+      <header className='dark bg-background text-foreground fixed inset-x-0 top-0 z-50 border-b border-[#b8dce5]/5 backdrop-blur-[18px]'>
         <div
           className={cn(
-            'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-            scrolled && 'max-w-[52rem] px-3 pt-3',
-            !scrolled && (fullWidth ? 'px-2' : 'max-w-7xl px-4 pt-0 md:px-6')
+            'mx-auto w-full px-[4.5%]',
+            !fullWidth && 'max-w-[90rem]'
           )}
         >
-          <nav
-            className={cn(
-              'flex items-center justify-between gap-2 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-              scrolled
-                ? 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
-                : 'h-16 px-2'
-            )}
-          >
+          <nav className='flex h-20 items-center justify-between gap-2'>
             {/* Logo */}
             <div className='@container/system-brand flex min-w-0 flex-1 items-center gap-1 lg:min-w-36'>
               {leftContent}
@@ -265,7 +245,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                       tabIndex={link.disabled ? -1 : undefined}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'text-muted-foreground hover:text-foreground min-w-0 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                        'min-w-0 truncate px-[18px] py-3 text-sm text-[#c4d0d7] transition-colors duration-200 hover:text-white',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
@@ -281,10 +261,10 @@ export function PublicHeader(props: PublicHeaderProps) {
                     disabled={link.disabled}
                     onClick={(event) => handleNavLinkClick(event, link)}
                     className={cn(
-                      'min-w-0 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                      'min-w-0 truncate px-[18px] py-3 text-sm transition-colors duration-200',
                       isActive
-                        ? 'text-foreground'
-                        : 'text-muted-foreground hover:text-foreground',
+                        ? 'text-white'
+                        : 'text-[#c4d0d7] hover:text-white',
                       link.disabled && 'pointer-events-none opacity-50'
                     )}
                   >
@@ -297,7 +277,6 @@ export function PublicHeader(props: PublicHeaderProps) {
             {/* Desktop actions */}
             <div className='hidden min-w-0 flex-1 items-center justify-end gap-0.5 lg:flex'>
               {showLanguageSwitcher && <LanguageSwitcher />}
-              {showThemeSwitch && <ThemeSwitch />}
               {showNotifications && (
                 <NotificationPopover
                   open={notifications.popoverOpen}
@@ -314,7 +293,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               {consoleLink && (
                 <Button
                   size='sm'
-                  className='ml-2 h-8 rounded-lg px-3.5 text-xs font-medium'
+                  className='ml-2 h-9 rounded-[7px] px-[17px] text-xs font-medium'
                   disabled={consoleLink.disabled}
                   render={
                     <Link
@@ -339,7 +318,6 @@ export function PublicHeader(props: PublicHeaderProps) {
 
             {/* Mobile: compact actions + hamburger */}
             <div className='flex shrink-0 items-center gap-2 lg:hidden'>
-              {showThemeSwitch && <ThemeSwitch />}
               {showAuthButtons && !loading && isAuthenticated && (
                 <ProfileDropdown />
               )}
@@ -380,7 +358,7 @@ export function PublicHeader(props: PublicHeaderProps) {
       {/* Mobile full-screen overlay */}
       <div
         className={cn(
-          'bg-background/98 fixed inset-0 z-40 backdrop-blur-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] lg:pointer-events-none lg:hidden',
+          'dark bg-background/98 text-foreground fixed inset-0 z-40 backdrop-blur-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] lg:pointer-events-none lg:hidden',
           mobileOpen
             ? 'pointer-events-auto opacity-100'
             : 'pointer-events-none opacity-0'

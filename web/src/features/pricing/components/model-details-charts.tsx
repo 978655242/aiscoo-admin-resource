@@ -20,7 +20,6 @@ import { VChart } from '@visactor/react-vchart'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { getSuccessRateColor } from '@/features/performance-metrics/lib/format'
 import { useThemeRadiusPx } from '@/lib/theme-radius'
 import { useChartTheme } from '@/lib/use-chart-theme'
@@ -50,17 +49,9 @@ function formatDayLabel(date: string): string {
   })
 }
 
-function getChartThemeTokens(resolvedTheme: string) {
-  return {
-    textColor:
-      resolvedTheme === 'dark'
-        ? 'rgba(255, 255, 255, 0.68)'
-        : 'rgba(15, 23, 42, 0.58)',
-    gridColor:
-      resolvedTheme === 'dark'
-        ? 'rgba(255, 255, 255, 0.12)'
-        : 'rgba(15, 23, 42, 0.12)',
-  }
+const CHART_THEME_TOKENS = {
+  textColor: 'rgba(15, 23, 42, 0.58)',
+  gridColor: 'rgba(15, 23, 42, 0.12)',
 }
 
 const UPTIME_AXIS_MAX = 100
@@ -99,7 +90,7 @@ export function LatencyTrendChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
-  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
+  const { textColor, gridColor } = CHART_THEME_TOKENS
 
   const spec = useMemo(() => {
     if (props.series.length === 0) return null
@@ -177,7 +168,7 @@ export function LatencyTrendChart(props: {
           key={`latency-${resolvedTheme}`}
           spec={{
             ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+            theme: 'light',
             background: 'transparent',
           }}
           option={VCHART_OPTION}
@@ -197,7 +188,7 @@ export function UptimeTrendChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
-  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
+  const { textColor, gridColor } = CHART_THEME_TOKENS
 
   const spec = useMemo(() => {
     if (props.series.length === 0) return null
@@ -305,7 +296,7 @@ export function UptimeTrendChart(props: {
           key={`uptime-trend-${resolvedTheme}`}
           spec={{
             ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+            theme: 'light',
             background: 'transparent',
           }}
           option={VCHART_OPTION}
@@ -325,12 +316,8 @@ export function ThroughputBarChart(props: {
 }) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
-  const { textColor, gridColor } = getChartThemeTokens(resolvedTheme)
-  const { customization } = useThemeCustomization()
-  const barRadius = useThemeRadiusPx(
-    '--radius-sm',
-    `${customization.preset}:${customization.radius}`
-  )
+  const { textColor, gridColor } = CHART_THEME_TOKENS
+  const barRadius = useThemeRadiusPx('--radius-sm', 'default')
 
   const filtered = useMemo(
     () => props.rows.filter((r) => r.throughput_tps > 0),
@@ -398,7 +385,7 @@ export function ThroughputBarChart(props: {
           key={`tput-${resolvedTheme}`}
           spec={{
             ...spec,
-            theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+            theme: 'light',
             background: 'transparent',
           }}
           option={VCHART_OPTION}

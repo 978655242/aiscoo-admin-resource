@@ -472,7 +472,7 @@ export function FlowCharts(props: FlowChartsProps) {
       ),
     [chartTitle, flowData.flow, t, textColor]
   )
-  const chartTheme = resolvedTheme === 'dark' ? 'dark' : 'light'
+  const chartTheme = 'light'
   const chartKey = [
     metric,
     topNodeLimit,

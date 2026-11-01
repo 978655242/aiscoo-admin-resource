@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/theme/color-scheme/builtin/default'
 
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
@@ -24,6 +23,7 @@ import type {
   ProcessedChartData,
   ProcessedUserChartData,
 } from '@/features/dashboard/types'
+import { CHART_PALETTE } from '@/lib/chart-palette'
 import { getCurrencyDisplay } from '@/lib/currency'
 import { formatChartTime, type TimeGranularity } from '@/lib/time'
 
@@ -40,13 +40,10 @@ type TooltipLineItem = {
 }
 
 export function getDashboardChartColors(domainLength: number): string[] {
-  const scheme =
-    vchartDefaultDataScheme.find(
-      (item) => !item.maxDomainLength || domainLength <= item.maxDomainLength
-    ) ?? vchartDefaultDataScheme.at(-1)
-
-  return (scheme?.scheme ?? []).filter(
-    (color): color is string => typeof color === 'string'
+  // Cycle the official-site palette so a long model list keeps distinct hues.
+  return Array.from(
+    { length: Math.max(domainLength, 1) },
+    (_, index) => CHART_PALETTE[index % CHART_PALETTE.length]
   )
 }
 
@@ -693,18 +690,7 @@ export function processChartData(
   }
 }
 
-const USER_COLORS = [
-  '#5B8FF9',
-  '#5AD8A6',
-  '#F6BD16',
-  '#E8684A',
-  '#6DC8EC',
-  '#9270CA',
-  '#FF9D4D',
-  '#269A99',
-  '#FF99C3',
-  '#5D7092',
-]
+const USER_COLORS = CHART_PALETTE
 
 export function processUserChartData(
   data: QuotaDataItem[],

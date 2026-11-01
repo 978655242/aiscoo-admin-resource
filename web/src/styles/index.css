@@ -19,16 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
-@import '@fontsource-variable/public-sans';
-/* Editorial serif (Lora) backing the `serif` font axis and the Anthropic
- * preset's default typography. See `--font-serif` in theme.css for the
- * full Latin + CJK fallback stack and `theme-presets.css` for the cascade
- * that activates it. Loaded globally so font-switching is instantaneous
- * with no FOUT once the variable is fetched. */
-@import '@fontsource-variable/lora';
-
 @import './theme.css';
-@import './theme-presets.css';
 
 @layer base {
   :root {
@@ -111,9 +102,7 @@ For commercial licensing, please contact support@quantumnous.com
   }
   body {
     @apply bg-background text-foreground has-[div[data-variant='inset']]:bg-sidebar min-h-svh w-full;
-    /* Font is driven by the theme's font axis via `--font-body`
-     * (defined in theme.css, swapped by `[data-theme-font='...']` blocks
-     * in theme-presets.css). Defaults to the browser's sans-serif. */
+    /* Official-site sans stack, see `--font-body` in theme.css. */
     font-family: var(--font-body);
   }
 
@@ -804,40 +793,22 @@ For commercial licensing, please contact support@quantumnous.com
   --color-primary-foreground: #000000;
 }
 
-/* Auth pages (sign-in, sign-up, XWork authorization) follow a BigModel-style shell: cool gray canvas, white card, cobalt primary. */
+/* Auth pages (sign-in, sign-up, XWork authorization) use the official-site palette: mint canvas, white card, deep-teal primary. */
 .auth-shell {
-  --background: #f7f8fa;
+  --background: #eff9f7;
   --card: #ffffff;
-  --foreground: #131212;
-  --muted-foreground: #5e5e66;
-  --border: #e0e0e0;
-  --input: #e0e0e0;
-  --primary: #134cff;
-  --primary-foreground: #ffffff;
-  --ring: #134cff;
-  --radius: 10px;
-  font-family:
-    MiSans, 'PingFang SC', 'PingFang HK', 'Helvetica Neue', Helvetica,
-    'Microsoft YaHei', sans-serif;
-}
-
-.dark .auth-shell {
-  --background: #141518;
-  --card: #1f2024;
-  --foreground: #f2f2f3;
-  --muted-foreground: #a0a0aa;
-  --border: #34353b;
-  --input: #3a3b42;
-  --primary: #3d6bff;
-  --ring: #3d6bff;
+  --foreground: #153640;
+  --muted-foreground: #4a6870;
+  --border: #bcd3d3;
+  --input: #bcd3d3;
+  --primary: #14414b;
+  --primary-foreground: #b9f9f8;
+  --ring: #137484;
+  --radius: 9px;
 }
 
 .auth-shell-band {
-  background: linear-gradient(120deg, #dfecfb 0%, #e8f0fd 55%, #f1f5fe 100%);
-}
-
-.dark .auth-shell-band {
-  background: linear-gradient(120deg, #1d2a45 0%, #1f2533 100%);
+  background: linear-gradient(120deg, #d5efed 0%, #e3f3f1 55%, #eff9f7 100%);
 }
 
 .auth-shell input:is([data-slot='input'], [data-slot='form-control']) {
@@ -848,7 +819,7 @@ For commercial licensing, please contact support@quantumnous.com
 .auth-shell button[type='submit'][data-slot='button'] {
   height: 2.75rem;
   font-size: 0.9375rem;
-  box-shadow: 0 4px 8px rgba(26, 90, 216, 0.2);
+  box-shadow: 0 4px 8px rgba(20, 65, 75, 0.2);
 }
 
 :is(.zen-plans, .zen-plans-dialog) .text-ui-xl {
@@ -1080,4 +1051,131 @@ For commercial licensing, please contact support@quantumnous.com
 .zen-plans .zen-plan-notice [data-slot='empty-description'],
 .zen-plans .zen-plan-notice p {
   font-size: calc(var(--ui-font-size, 14px) - 2px);
+}
+
+/* Official-site display headings: songti serif, regular weight, tight tracking. */
+@layer base {
+  h1,
+  [data-slot='sheet-title'],
+  [data-slot='dialog-title'] {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    letter-spacing: -0.03em;
+  }
+}
+
+/* ── Home hero (official-site motion) ── */
+@keyframes hero-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -8px;
+  }
+}
+@keyframes hero-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(81, 207, 213, 0.14),
+      0 0 6px rgba(38, 176, 187, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 8px rgba(81, 207, 213, 0.1),
+      0 0 22px rgba(38, 176, 187, 0.4);
+  }
+}
+@keyframes hero-orbit {
+  from {
+    transform: translate(-50%, -50%) scaleX(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scaleX(1.04);
+  }
+  to {
+    transform: translate(-50%, -50%) scaleX(1);
+  }
+}
+.hero-float {
+  animation: hero-float 6s ease-in-out infinite;
+}
+.hero-pulse {
+  animation: hero-pulse 1.6s ease-in-out infinite;
+}
+.hero-orbital {
+  animation: hero-orbit 14s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-float,
+  .hero-pulse,
+  .hero-orbital {
+    animation: none;
+  }
+}
+
+/* Cursor-following highlight and sheen shared by the home cards. */
+.glow-card {
+  transition:
+    transform 0.42s cubic-bezier(0.2, 0.8, 0.2, 1.15),
+    box-shadow 0.3s ease;
+}
+.glow-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    220px circle at var(--mx, 50%) var(--my, 0%),
+    rgba(255, 255, 255, 0.28),
+    transparent 70%
+  );
+  transition: opacity 0.3s ease;
+}
+.glow-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.3) 48%,
+    transparent 64%
+  );
+  transform: translateX(-120%);
+}
+.glow-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 26px 46px rgba(12, 40, 48, 0.28);
+}
+.glow-card:hover::before {
+  opacity: 1;
+}
+.glow-card:hover::after {
+  transform: translateX(120%);
+  transition: transform 0.7s ease;
+}
+@keyframes flow-dash {
+  to {
+    background-position: 24px 0;
+  }
+}
+.flow-line {
+  background-image: linear-gradient(90deg, #46dcec 50%, transparent 50%);
+  background-size: 12px 2px;
+  background-repeat: repeat-x;
+  animation: flow-dash 1.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .glow-card,
+  .glow-card::after,
+  .flow-line {
+    transition: none;
+    animation: none;
+  }
 }

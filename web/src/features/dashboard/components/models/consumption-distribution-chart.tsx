@@ -22,7 +22,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { IconBadge } from '@/components/ui/icon-badge'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useTheme } from '@/context/theme-provider'
 import {
   CONSUMPTION_DISTRIBUTION_CHART_OPTIONS,
@@ -33,6 +32,7 @@ import type {
   ConsumptionDistributionChartType,
   QuotaDataItem,
 } from '@/features/dashboard/types'
+import { applyOfficialChartTheme } from '@/lib/chart-palette'
 import { useThemeRadiusPx } from '@/lib/theme-radius'
 import type { TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
@@ -61,11 +61,7 @@ export function ConsumptionDistributionChart(
 ) {
   const { t } = useTranslation()
   const { resolvedTheme } = useTheme()
-  const { customization } = useThemeCustomization()
-  const chartRadius = useThemeRadiusPx(
-    '--radius-md',
-    `${customization.preset}:${customization.radius}`
-  )
+  const chartRadius = useThemeRadiusPx('--radius-md', 'default')
   const [chartType, setChartType] = useState<ConsumptionDistributionChartType>(
     props.defaultChartType ?? 'bar'
   )
@@ -91,7 +87,7 @@ export function ConsumptionDistributionChart(
 
       const ThemeManager = await themeManagerPromise
       themeManagerRef.current = ThemeManager
-      ThemeManager.setCurrentTheme(resolvedTheme === 'dark' ? 'dark' : 'light')
+      applyOfficialChartTheme(ThemeManager)
       setThemeReady(true)
     }
 
@@ -116,7 +112,6 @@ export function ConsumptionDistributionChart(
     props.loading ? 'loading' : 'ready',
     props.data.length,
     resolvedTheme,
-    customization.preset,
   ].join('-')
 
   return (
@@ -160,7 +155,7 @@ export function ConsumptionDistributionChart(
             key={chartKey}
             spec={{
               ...spec,
-              theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+              theme: 'light',
               background: 'transparent',
             }}
             option={VCHART_OPTION}

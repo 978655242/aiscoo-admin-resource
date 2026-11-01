@@ -227,7 +227,7 @@ export function WechatOpenLogin(props: WechatOpenLoginProps) {
             redirect_uri: encodeURIComponent(props.capability.redirect_uri),
             state: attempt.state,
             self_redirect: false,
-            style: resolvedTheme === 'dark' ? 'white' : 'black',
+            style: 'black',
             lang,
             onReady: (ready) => {
               if (!isCurrent()) return
