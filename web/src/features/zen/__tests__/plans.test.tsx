@@ -221,19 +221,15 @@ it.each(['personal', 'team'] as const)(
       within(footer).getByRole('link', { name: 'User Agreement' }),
       within(footer).getByRole('link', { name: 'Privacy Policy' }),
     ]
-    expect(within(footer).getAllByRole('link')).toHaveLength(3)
+    expect(within(footer).getAllByRole('link')).toHaveLength(2)
     expect(legalLinks[0]).toHaveAttribute('href', '/user-agreement')
     expect(legalLinks[1]).toHaveAttribute('href', '/privacy-policy')
     // The legal row shares the attribution line's start edge instead of centering.
     const legalRow = legalLinks[0].closest('p')
     expect(legalRow).toHaveClass('text-start')
     expect(legalRow).not.toHaveClass('text-center')
-    expect(
-      within(footer).getByRole('link', {
-        name: 'Frontend design and development by New API contributors.',
-      })
-    ).toHaveAttribute('href', 'https://github.com/QuantumNous/new-api')
     expect(footer).toHaveTextContent('aiscoo')
+    expect(footer).not.toHaveTextContent(/New API/i)
     expect(footer).not.toHaveTextContent(
       /by clicking|by creating|you agree|consent|同意/i
     )
