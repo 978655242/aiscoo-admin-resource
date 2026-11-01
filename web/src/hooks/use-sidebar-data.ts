@@ -22,7 +22,6 @@ import {
   ClipboardList,
   CreditCard,
   FileText,
-  FlaskConical,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -52,17 +51,6 @@ export function useSidebarData(): SidebarData {
 
   return {
     navGroups: [
-      {
-        id: 'chat',
-        title: t('Chat'),
-        items: [
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: FlaskConical,
-          },
-        ],
-      },
       {
         id: 'general',
         title: t('General'),

@@ -52,10 +52,6 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
 }
 
 export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
-  chat: {
-    enabled: true,
-    playground: true,
-  },
   console: {
     enabled: true,
     detail: true,
@@ -192,6 +188,8 @@ export function parseSidebarModulesAdmin(
 
     Object.entries(parsed).forEach(([sectionKey, raw]) => {
       if (!raw || typeof raw !== 'object') return
+      // The chat sidebar area was removed; drop its stale toggles.
+      if (sectionKey === 'chat') return
 
       const defaultSection = defaults[sectionKey] ?? { enabled: true }
       const sectionConfig: SidebarSectionConfig = {
@@ -204,8 +202,6 @@ export function parseSidebarModulesAdmin(
       Object.entries(raw as Record<string, unknown>).forEach(
         ([moduleKey, moduleValue]) => {
           if (moduleKey === 'enabled') return
-          // The chat presets menu was removed; drop its stale toggle.
-          if (sectionKey === 'chat' && moduleKey === 'chat') return
           sectionConfig[moduleKey] = toBoolean(
             moduleValue,
             defaultSection[moduleKey] ?? true
