@@ -34,7 +34,11 @@ const chart = vi.hoisted(() =>
 )
 vi.mock('@visactor/react-vchart', () => ({ VChart: chart }))
 vi.mock('@visactor/vchart', () => ({
-  ThemeManager: { setCurrentTheme: vi.fn() },
+  ThemeManager: {
+    getTheme: vi.fn(() => ({})),
+    registerTheme: vi.fn(),
+    setCurrentTheme: vi.fn(),
+  },
 }))
 
 let client: QueryClient

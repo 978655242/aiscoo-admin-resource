@@ -51,14 +51,8 @@ type ModelsSectionProps = {
 export function ModelsSection(props: ModelsSectionProps) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
-  const chartTextColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.68)'
-      : 'rgba(15, 23, 42, 0.58)'
-  const chartGridColor =
-    resolvedTheme === 'dark'
-      ? 'rgba(255, 255, 255, 0.12)'
-      : 'rgba(15, 23, 42, 0.12)'
+  const chartTextColor = 'rgba(15, 23, 42, 0.58)'
+  const chartGridColor = 'rgba(15, 23, 42, 0.12)'
 
   // Order points so the largest model appears at the bottom of every stack.
   const orderedPoints = useMemo(() => {
@@ -193,7 +187,7 @@ export function ModelsSection(props: ModelsSectionProps) {
               key={`models-history-${resolvedTheme}-${props.period}`}
               spec={{
                 ...spec,
-                theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+                theme: 'light',
                 background: 'transparent',
               }}
               option={VCHART_OPTION}

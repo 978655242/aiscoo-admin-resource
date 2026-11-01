@@ -472,8 +472,7 @@ function PlanCard(props: {
             )}
           </div>
           <p className='zen-plan-secondary text-ui-caption'>
-            {t('Reference price')}:{' '}
-            {formatZenReferencePrice(card.plan, locale)}
+            {t('Reference price')}: {formatZenReferencePrice(card.plan, locale)}
           </p>
           <p className='zen-plan-secondary text-ui-caption'>
             {t('Duration')}: {planDuration(card.plan, t, locale)}
@@ -518,9 +517,7 @@ function PlanCard(props: {
               'Administrator descriptions are display information, not official aiscoo service entitlements.'
             )}
           </p>
-          {issue && (
-            <p className='zen-plan-config-issue text-ui-sm'>{issue}</p>
-          )}
+          {issue && <p className='zen-plan-config-issue text-ui-sm'>{issue}</p>}
           <div className='zen-plan-card-action'>
             {card.presentation.assignable ? (
               <Button

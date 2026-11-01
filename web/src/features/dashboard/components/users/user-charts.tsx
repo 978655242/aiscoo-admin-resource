@@ -40,6 +40,7 @@ import type {
   ProcessedUserChartData,
   UserChartsFilters,
 } from '@/features/dashboard/types'
+import { applyOfficialChartTheme } from '@/lib/chart-palette'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
@@ -131,7 +132,7 @@ export function UserCharts(props: UserChartsProps) {
       }
       const ThemeManager = await themeManagerPromise
       themeManagerRef.current = ThemeManager
-      ThemeManager.setCurrentTheme(resolvedTheme === 'dark' ? 'dark' : 'light')
+      applyOfficialChartTheme(ThemeManager)
       setThemeReady(true)
     }
     updateTheme()
@@ -249,7 +250,7 @@ export function UserCharts(props: UserChartsProps) {
                       key={`user-${chart.value}-${topUserLimit}-${resolvedTheme}`}
                       spec={{
                         ...spec,
-                        theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+                        theme: 'light',
                         background: 'transparent',
                       }}
                       option={VCHART_OPTION}

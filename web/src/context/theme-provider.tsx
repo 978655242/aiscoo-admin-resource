@@ -16,133 +16,46 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
+import { createContext, useContext, useEffect } from 'react'
 
-// ZEN: Preserve Native first-frame preferences even when browser Storage is unavailable.
-import { readZenPlanDisplayContext } from '@/features/zen/display-context'
-import {
-  readThemePreference,
-  THEME_STORAGE_KEYS,
-  writeThemePreference,
-} from '@/lib/theme-storage'
-
-type Theme = 'dark' | 'light' | 'system'
-type ResolvedTheme = Exclude<Theme, 'system'>
-
-const DEFAULT_THEME = 'system'
-const THEMES = new Set<Theme>(['dark', 'light', 'system'])
-
-type ThemeProviderProps = {
-  children: React.ReactNode
-  defaultTheme?: Theme
-  storageKey?: string
-}
+// The admin UI uses a single light theme that matches the official site, so
+// the light/dark/system preference and the appearance presets were removed.
+// Keys written by earlier builds are cleared once so they cannot linger.
+const LEGACY_THEME_STORAGE_KEYS = [
+  'newapi:theme:v1:mode',
+  'newapi:theme:v1:preset',
+  'newapi:theme:v1:font',
+  'newapi:theme:v1:radius',
+  'newapi:theme:v1:scale',
+  'newapi:theme:v1:content-layout',
+]
 
 type ThemeProviderState = {
-  defaultTheme: Theme
-  resolvedTheme: ResolvedTheme
-  theme: Theme
-  setTheme: (theme: Theme) => void
-  resetTheme: () => void
+  resolvedTheme: 'light'
 }
 
-const initialState: ThemeProviderState = {
-  defaultTheme: DEFAULT_THEME,
+const ThemeContext = createContext<ThemeProviderState>({
   resolvedTheme: 'light',
-  theme: DEFAULT_THEME,
-  setTheme: () => null,
-  resetTheme: () => null,
-}
+})
 
-const ThemeContext = createContext<ThemeProviderState>(initialState)
-
-function getSystemTheme(): ResolvedTheme {
-  if (typeof window === 'undefined') return 'light'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light'
-}
-
-function resolveTheme(theme: Theme): ResolvedTheme {
-  return theme === 'system' ? getSystemTheme() : theme
-}
-
-export function ThemeProvider({
-  children,
-  defaultTheme = DEFAULT_THEME,
-  storageKey = THEME_STORAGE_KEYS.mode,
-  ...props
-}: ThemeProviderProps) {
-  const [theme, _setTheme] = useState<Theme>(
-    () =>
-      readZenPlanDisplayContext()?.theme ??
-      readThemePreference(storageKey, THEMES, defaultTheme)
-  )
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    resolveTheme(theme)
-  )
-
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    const root = window.document.documentElement
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-
-    const applyTheme = () => {
-      const nextResolvedTheme = theme === 'system' ? getSystemTheme() : theme
-      root.classList.remove('light', 'dark')
-      root.classList.add(nextResolvedTheme)
-      setResolvedTheme(nextResolvedTheme)
+    const root = document.documentElement
+    root.classList.remove('dark')
+    root.classList.add('light')
+    try {
+      LEGACY_THEME_STORAGE_KEYS.forEach((key) =>
+        window.localStorage.removeItem(key)
+      )
+    } catch {
+      // Storage can be blocked; the fixed theme does not depend on it.
     }
-
-    applyTheme()
-
-    mediaQuery.addEventListener('change', applyTheme)
-
-    return () => mediaQuery.removeEventListener('change', applyTheme)
-  }, [theme])
-
-  const setTheme = useCallback(
-    (theme: Theme) => {
-      writeThemePreference(storageKey, theme)
-      _setTheme(theme)
-    },
-    [storageKey]
-  )
-
-  const resetTheme = useCallback(() => {
-    writeThemePreference(storageKey, null)
-    _setTheme(defaultTheme)
-  }, [defaultTheme, storageKey])
-
-  const contextValue = useMemo(
-    () => ({
-      defaultTheme,
-      resolvedTheme,
-      resetTheme,
-      theme,
-      setTheme,
-    }),
-    [defaultTheme, resolvedTheme, resetTheme, theme, setTheme]
-  )
+  }, [])
 
   return (
-    <ThemeContext value={contextValue} {...props}>
-      {children}
-    </ThemeContext>
+    <ThemeContext value={{ resolvedTheme: 'light' }}>{children}</ThemeContext>
   )
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export const useTheme = () => {
-  const context = useContext(ThemeContext)
-
-  if (!context) throw new Error('useTheme must be used within a ThemeProvider')
-
-  return context
-}
+export const useTheme = () => useContext(ThemeContext)

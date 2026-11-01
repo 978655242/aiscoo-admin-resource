@@ -649,8 +649,19 @@ export function OverviewDashboard() {
           <div id={setupGuideId} hidden={!setupGuideExpanded}>
             {setupGuideExpanded && (
               <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
-                <CardStaggerItem className='bg-card h-full overflow-hidden rounded-2xl border shadow-xs'>
-                  <div className='relative h-full overflow-hidden p-4 sm:p-5'>
+                <CardStaggerItem className='dark h-full overflow-hidden rounded-2xl border border-[rgba(204,238,244,0.17)] bg-[#09131f] text-[#f5f8fa] shadow-[0_14px_40px_rgba(4,40,47,0.25)]'>
+                  <div className='relative isolate h-full overflow-hidden p-4 sm:p-5'>
+                    <div
+                      aria-hidden
+                      className='pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-[55%]'
+                      style={{
+                        backgroundImage: 'url(/brand/horizon.png)',
+                        backgroundSize: '100% 100%',
+                        maskImage: 'linear-gradient(transparent, #000 40px)',
+                        WebkitMaskImage:
+                          'linear-gradient(transparent, #000 40px)',
+                      }}
+                    />
                     <SetupGuideBackdrop />
                     <div className='relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_21rem]'>
                       <div className='flex min-w-0 flex-col gap-5'>

@@ -168,7 +168,7 @@ function renderPlans(
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <ThemeProvider defaultTheme='light'>
+      <ThemeProvider>
         <ZenPlans />
       </ThemeProvider>
     </QueryClientProvider>
