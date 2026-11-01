@@ -298,11 +298,14 @@ func testXCodeStartupMigration(t *testing.T, dialect, dsn, origin string) {
 	require.NoError(t, err)
 	managedModel := Model{ModelName: "managed-model", XCodeConfig: LongText(fullConfig)}
 	authorization := XCodeAuthorization{UserId: 84, Revision: 1}
+	operation := XCodeRevokeOperation{OperationHash: strings.Repeat("a", 64), CredentialHash: strings.Repeat("b", 64), UserID: 84, SessionID: "xcode-sid", ClientID: "xcode-desktop", ExpiresAt: 4102444800, Result: "committed"}
 	for pass := range 2 {
 		err := InitDB()
 		db = DB
 		connections = append(connections, db)
 		require.NoError(t, err, "production InitDB pass %d", pass+1)
+		require.True(t, db.Migrator().HasTable(&XCodeRevokeOperation{}))
+		require.True(t, db.Migrator().HasIndex(&XCodeRevokeOperation{}, "idx_x_code_revoke_operations_expires_at"))
 		if pass == 0 && !upgrade {
 			for _, row := range rows {
 				if row.original == nativePreConsume {
@@ -354,6 +357,7 @@ func testXCodeStartupMigration(t *testing.T, dialect, dsn, origin string) {
 			require.NoError(t, db.Model(&XCodeAuthorization{}).Count(&count).Error)
 			assert.Zero(t, count, "migration must not grant any XCode authorization")
 			require.NoError(t, db.Create(&managedSession).Error)
+			require.NoError(t, db.Create(&operation).Error)
 			require.NoError(t, db.Create(&managedToken).Error)
 			require.NoError(t, db.Create(&managedSubscription).Error)
 			assert.EqualValues(t, 1, managedSubscription.QuotaResetGeneration, "new dedicated instances start in generation one")
@@ -363,6 +367,10 @@ func testXCodeStartupMigration(t *testing.T, dialect, dsn, origin string) {
 			authorization.SubscriptionId = managedSubscription.Id
 			require.NoError(t, db.Create(&authorization).Error)
 		}
+		var savedOperation XCodeRevokeOperation
+		require.NoError(t, db.First(&savedOperation, "operation_hash = ?", operation.OperationHash).Error)
+		assert.Equal(t, operation, savedOperation)
+		require.Error(t, db.Create(&operation).Error, "per-session operation keys remain unique")
 		for _, row := range []struct {
 			expected any
 			saved    any

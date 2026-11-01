@@ -157,7 +157,7 @@ CLI 登录采用原生浏览器授权和独立 SID；不复制桌面密钥或会
 - Relay admission 校验同用户、SID 活跃、当前 auth_version、token 目的及有效期。refresh 轮换的 SessionVersion 不应无故使同 SID 的 relay key失效；安全变更/撤销则必须失效。
 - 用户通过原生 key 管理删除/停用托管 key 时，撤销其专用客户端 Session；不能后台自动重建被明确撤销的凭据。原生 CRUD 不得修改其目的、SID、资金域、无限额度标记等受管字段。
 
-Session 缓存、撤销 tombstone 和多节点传播语义沿用 [认证文档](../authentication.md#多节点-redis-拓扑)，不宣称超过原生保证的即时全节点撤销。本期本机验收必须观察实际撤销结果。删除 key 同时按原生方式清理 key 缓存；即使清理失败，SID 权威校验仍是拒绝条件。
+Session 授权与多节点撤销语义沿用 [认证文档](../authentication.md#多节点-redis-拓扑)：每次读取主数据库已提交状态，Redis 的 active 数据不能授权；提交前已授权的在途请求不保证中断。本期本机验收必须观察实际撤销结果。删除 key 同时按原生方式清理 key 缓存；即使清理失败，SID 权威校验仍是拒绝条件。
 
 ## 5. 授权与计费
 
@@ -247,6 +247,18 @@ SessionBundle：`schema_version`、`server_time`、`access_token`、`access_expi
 `user={id,username,display_name,avatar_url}`，avatar_url 无来源时 null；不传密码、管理员权限矩阵或账户安全信息。`relay_credential={token,expires_at}`，token 是 `sk-` 明文，只在认证响应给 Host。刷新不生成新 relay key；以当前有效关联 key 返回同一凭据。明确删除/停用该 key 后 refresh 拒绝，要求重新登录，不自动恢复。
 
 code 兑换必须一次性，重复返回 `XCODE_AUTH_CODE_INVALID`；refresh 的并发恢复和重放撤销沿用原生实现，不另做永久有效 refresh 或客户端无限重试。
+
+### 6.2.2 Native 旧 SID 撤销操作（草稿实现，待独立复核）
+
+本节为独立、追加的协议增量；现有客户端、登录、refresh 和 logout 保持原有行为，服务端不默认强制升级。客户端切换后应异步撤销被替换窗口原有 SID；其他窗口使用各自独立 SID，不能按用户批量撤销。旧客户端升级由客户端要求重新登录，不在服务端默认强制失效。客户端必须先在本机安全凭据库持久化待撤销的 SID、旧 refresh 凭据与随机 operation ID，确认结果前保留并可跨重启重试，不得写入 Renderer、日志、URL 或普通配置。
+
+新增 `POST /api/xcode/v1/auth/revoke-operations`（提交）及 `POST /api/xcode/v1/auth/revoke-operations/query`（查询），使用 JSON body `{session_id,refresh_token,client_id,operation_id}`；均不接受裸 SID、operation ID 或新账号凭据作为认证。operation_id 为客户端随机生成的 128-bit 值，以 32 位小写十六进制表示。成功返回 `{success:true,data:{result:"committed"}}`；当前实现不会写入 `already_revoked`，也不承诺该结果可查询；查询不存在或过期的操作返回通用认证失败，不推断结果。首次撤销时原 refresh 必须是当前值，或在现有并发宽限期内的前代值；不改变现有 refresh 重放撤销机制。客户端和服务端精确绑定原 SID、用户、client_id、操作 ID 与 refresh 凭据的服务端 HMAC 校验值。响应和查询不得泄露其他用户的 SID、操作结果或凭据；错误统一且不可缓存。
+
+首次执行时在同一数据库事务中撤销指定会话、停用其托管 key 并保存操作提交结果；复用现有撤销 fence，遵守锁顺序和主库权威校验边界。相同绑定的重试或结果查询即使 refresh 并发宽限期已经结束也只读返回本操作已提交，不重新执行撤销；操作记录的存储键为服务端 HMAC（用途分离密钥，输入为 SID、半角冒号与 operation_id），键空间按 SID 隔离：同一 operation_id 在不同会话（含不同用户）各自独立执行、互不可见，因此不产生跨会话冲突，也没有“operation ID 已被占用”的存在性探测面；SID 必须是签发时的规范小写 UUID 形式，其他写法统一按认证失败处理，避免同一会话（MySQL 的 sid 比较不区分大小写）因写法不同得到多个键空间。同一 SID 下相同 operation_id 但凭据或 client_id 不同必须拒绝。查询时凭据错误、operation_id 不存在或已过期必须返回相同的 HTTP 状态与响应体（request_id 除外），并经过相同的数据库访问路径（一次按键读取）；提交路径不承诺抹平计时差异，但 operation_id 为客户端随机 128-bit 且按 SID 隔离，不存在可枚举的共享空间。首次撤销（尚无该操作记录）时，凭据既不是当前 refresh 也不在并发宽限期内的前代，必须在开启事务、获取任何行锁之前以与其他凭据错误完全相同的响应拒绝，避免无效凭据排队占用用户行锁和会话行锁；该预检只基于事务外读取的快照，事务内必须在行锁下重新核验，不得替代锁内复核。已存在操作记录的查询与重试路径不受预检影响：refresh 已轮换或宽限结束后，仍可凭原凭据读取已提交结果。目标已被其他安全事件撤销时，已撤销会话不能凭旧 refresh 创建新的操作记录；只有撤销前已提交且绑定的操作可查询或重试，无法证明结果时统一认证失败。这样不会因同一旧 refresh 重复提交不同 ID 而无限增加记录，也不得伪称本操作提交。事务提交报告错误或结果不明时，本次 submit 只返回错误（HTTP 503 `XCODE_BACKEND_UNAVAILABLE`），绝不返回 committed；客户端用相同 SID、凭据与 operation_id 调用 query 确认：committed 表示已持久提交，通用认证失败表示没有记录，可用同一 operation_id 重试 submit。提交失败可能遗留短期 Redis 拒绝栅栏，使仍有效的会话在栅栏过期前被保守拒绝，这是失败关闭，不是撤销成功。不存在、过期、失败或不可查询的记录不能推断成功。不得为旧凭据开启另一操作或扩大其有效权限。
+
+操作结果保留期工程默认 7 天，且不得超过原会话绝对过期时间；清理需有界、幂等，清理后返回不可确认。只保存按用途分离的服务端 HMAC 摘要，禁止明文凭据；沿用现有 `SESSION_SECRET` 派生，生产各节点必须配置同一高熵持久密钥。密钥更换会使尚未过期的结果不可确认，不能在轮换后伪称成功，客户端需按未确认状态处理；存储泄露、重放、跨用户、并发写入、迁移与缓存失败须有明确验证。响应丢失、已轮换后首次撤销与撤销成功后宽限期外重试均须覆盖。真实 SQLite、MySQL、PostgreSQL 新库及代表性已发布版本升级迁移、两次启动和保留期清理全部通过才可合并。
+
+安全依据：[ASVS 5.0.0](https://github.com/OWASP/ASVS/tree/v5.0.0) V7.2.1（所有会话令牌校验由可信后端完成，本变更使 active 判定只来自主库）、V7.4.1（退出后拒绝使用会话）、V7.2.3（随机引用凭据熵）、V14.2.1（不在 URL 传递会话令牌）、V16.2.5（日志中的敏感数据保护），以及[Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)、[Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) 和 [OAuth 2.0](https://cheatsheetseries.owasp.org/cheatsheets/OAuth2_Cheat_Sheet.html) 指南。本节为草稿实现，待独立复核，不表示已通过安全验收；验证记录与剩余限制不属于本规格，见交接或 PR 描述，以及认证文档“多节点 Redis 拓扑”和 refresh 重放一节。
 
 ### 6.2.1 前端默认头像
 

@@ -468,49 +468,26 @@ func GetUserSessionBySID(sid string) (*UserSession, error) {
 	return &session, nil
 }
 
-// GetUserSessionCached validates cached state first and falls back to the
-// database on a miss or Redis read failure. A deny tombstone never falls back.
+// GetUserSessionCached uses Redis only for early denial; an active session must
+// always be read from the authoritative primary database.
 func GetUserSessionCached(sid string) (*UserSession, error) {
 	if sid == "" {
 		return nil, ErrUserSessionInvalid
 	}
 	if common.RedisEnabled {
-		entry, err := getUserSessionCache(sid)
-		if err == nil {
-			return entry.session(), nil
-		}
-		if errors.Is(err, ErrUserSessionInactive) {
+		if _, err := getUserSessionCache(sid); errors.Is(err, ErrUserSessionInactive) {
 			return nil, err
 		}
 	}
 
-	cacheDeadline := UserSessionCacheDeadline()
+	// 长事务可能超过拒绝栅栏寿命，且 Redis 可能丢失栅栏；缓存 active
+	// 无法证明撤销尚未提交，必须以新发起的主库读取作为授权依据。
 	session, err := GetUserSessionBySID(sid)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().Unix()
-	if session.Status != UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now {
-		if common.RedisEnabled {
-			entry := session.cacheEntry()
-			entry.Status = UserSessionStatusRevoked
-			_ = writeUserSessionCache(entry, time.Time{})
-		}
+	if session.Status != UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= time.Now().Unix() {
 		return nil, ErrUserSessionInactive
-	}
-	if common.RedisEnabled {
-		if err := writeUserSessionCache(session.cacheEntry(), cacheDeadline); err != nil {
-			if errors.Is(err, errUserSessionCacheObservationStale) {
-				if confirmErr := confirmUserSessionActiveSnapshot(session); confirmErr != nil {
-					return nil, confirmErr
-				}
-				return session, nil
-			}
-			if errors.Is(err, ErrUserSessionInactive) {
-				return nil, err
-			}
-			common.SysLog(common.LogText("failed to synchronously populate user session cache: %s", err.Error()))
-		}
 	}
 	return session, nil
 }
@@ -783,7 +760,8 @@ func RotateUserSessionRefresh(userID int, sid, presentedHash, nextHash string, n
 		// whole token family is compromised. Publish the deny fence first, then
 		// revoke the active row regardless of a concurrent refresh rotation.
 		if err := writeUserSessionDenyFence(&session, UserSessionStatusRevoking, now, "refresh_reuse"); err != nil {
-			return nil, err
+			// 已确认凭据重放，Redis 故障不能阻止主库持久撤销。
+			common.SysLog("failed to publish refresh-reuse session fence; revoking in database")
 		}
 		err := DB.Transaction(func(tx *gorm.DB) error {
 			result := tx.Model(&UserSession{}).

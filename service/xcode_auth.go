@@ -7,10 +7,12 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -53,6 +55,50 @@ type XCodeLogoutRequest struct {
 	SessionID    string `json:"session_id"`
 	RefreshToken string `json:"refresh_token"`
 	ClientID     string `json:"client_id"`
+}
+
+type XCodeRevokeOperationRequest struct {
+	SessionID    string `json:"session_id"`
+	RefreshToken string `json:"refresh_token"`
+	ClientID     string `json:"client_id"`
+	OperationID  string `json:"operation_id"`
+}
+
+func SubmitXCodeRevokeOperation(input XCodeRevokeOperationRequest) (string, error) {
+	return xcodeRevokeOperation(input, false)
+}
+
+func QueryXCodeRevokeOperation(input XCodeRevokeOperationRequest) (string, error) {
+	return xcodeRevokeOperation(input, true)
+}
+
+func xcodeRevokeOperation(input XCodeRevokeOperationRequest, query bool) (string, error) {
+	if (input.ClientID != XCodeClientID && input.ClientID != XWorkCLIClientID) || len(input.OperationID) != 32 {
+		return "", ErrRefreshTokenInvalid
+	}
+	for _, c := range input.OperationID {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", ErrRefreshTokenInvalid
+		}
+	}
+	sid, secret, ok := splitRefreshToken(input.RefreshToken)
+	if !ok || sid != input.SessionID || strings.TrimSpace(input.RefreshToken) != input.RefreshToken {
+		return "", ErrRefreshTokenInvalid
+	}
+	// uuid.Parse 接受大写、花括号等写法，而 MySQL 的 sid 比较不区分大小写；
+	// 只接受签发时的规范形式，避免同一会话因写法不同得到多个操作键空间。
+	if parsed, err := uuid.Parse(sid); err != nil || parsed.String() != sid {
+		return "", ErrRefreshTokenInvalid
+	}
+	// 键按 SID 隔离：不同会话即使使用相同 operation_id 也映射到互不相交的键，
+	// 因而没有跨会话冲突，也没有“ID 已被占用”的存在性信号。
+	operationHash := common.GenerateHMACWithKey(authSigningKey("xcode-revoke-operation-id"), sid+":"+input.OperationID)
+	credentialHash := common.GenerateHMACWithKey(authSigningKey("xcode-revoke-operation-proof"), input.RefreshToken)
+	result, err := model.RunXCodeRevokeOperation(sid, input.ClientID, operationHash, credentialHash, hashRefreshSecret(secret), query)
+	if errors.Is(err, model.ErrUserSessionRefreshInvalid) || errors.Is(err, model.ErrUserSessionInvalid) || errors.Is(err, model.ErrUserSessionInactive) || errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrRefreshTokenInvalid
+	}
+	return result, err
 }
 
 type XCodeAuthorizationRequestView struct {
