@@ -162,10 +162,9 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Price cannot exceed 9999")
 		return
 	}
-	if req.Plan.Currency == "" {
+	if req.Plan.Currency != "CNY" {
 		req.Plan.Currency = "USD"
 	}
-	req.Plan.Currency = "USD"
 	if req.Plan.AllowBalancePay == nil {
 		req.Plan.AllowBalancePay = common.GetPointer(true)
 	}
@@ -242,10 +241,6 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.Id = id
-	if req.Plan.Currency == "" {
-		req.Plan.Currency = "USD"
-	}
-	req.Plan.Currency = "USD"
 	if req.Plan.DurationUnit == "" {
 		req.Plan.DurationUnit = model.SubscriptionDurationMonth
 	}
@@ -286,7 +281,6 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"title":                      req.Plan.Title,
 			"subtitle":                   req.Plan.Subtitle,
 			"price_amount":               req.Plan.PriceAmount,
-			"currency":                   req.Plan.Currency,
 			"duration_unit":              req.Plan.DurationUnit,
 			"duration_value":             req.Plan.DurationValue,
 			"custom_seconds":             req.Plan.CustomSeconds,
@@ -304,6 +298,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			// XCODE: explicit map updates must preserve both metadata edits and null clearing.
 			"xcode_display": req.Plan.XCodeDisplay,
 			"updated_at":    common.GetTimestamp(),
+		}
+		// An omitted currency keeps the stored one, so editing in the console never resets CNY to USD.
+		if req.Plan.Currency == "CNY" || req.Plan.Currency == "USD" {
+			updateMap["currency"] = req.Plan.Currency
 		}
 		if req.Plan.AllowBalancePay != nil {
 			updateMap["allow_balance_pay"] = *req.Plan.AllowBalancePay
