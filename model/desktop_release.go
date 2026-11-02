@@ -1,8 +1,9 @@
 package model
 
 import (
-	"errors"
+	"fmt"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -37,7 +38,13 @@ type DesktopReleaseFile struct {
 	Size      int64  `gorm:"not null" json:"size"`
 }
 
-var ErrDesktopReleaseExists = errors.New("desktop release already exists")
+// errDesktopReleaseExistsKey is the English source text of the refusal and its
+// key in the web console's locale files.
+const errDesktopReleaseExistsKey = "desktop release already exists"
+
+// ErrDesktopReleaseExists is also a console message, so the web console can
+// translate it. It keeps its identity for errors.Is.
+var ErrDesktopReleaseExists = fmt.Errorf("%w", common.NewMessage(errDesktopReleaseExistsKey))
 
 func preloadDesktopReleaseFiles(db *gorm.DB) *gorm.DB {
 	return db.Order("position ASC")
