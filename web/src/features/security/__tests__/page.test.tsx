@@ -154,6 +154,17 @@ async function renderPage(path = '/security') {
 }
 
 describe('security page migration', () => {
+  it('fills the shared page width without an extra centered width cap', async () => {
+    await renderPage()
+    const verification = await screen.findByRole('complementary', {
+      name: 'Security verification',
+    })
+    const content = verification.parentElement?.parentElement
+    expect(content).toHaveClass('w-full')
+    expect(content?.className).not.toMatch(/\bmax-w-/)
+    expect(content).not.toHaveClass('mx-auto')
+  })
+
   it('places account management on the left and verification and privacy on the right', async () => {
     await renderPage()
     const login = await screen.findByRole('region', {
