@@ -216,6 +216,53 @@ test('document layout reserves space below the fixed header and aligns sticky di
   ).toHaveClass('top-32')
 })
 
+test('overview lists compatible API addresses and copies the selected URL with its port', async () => {
+  const user = userEvent.setup()
+  const copy = vi.spyOn(navigator.clipboard, 'writeText')
+  renderPage()
+  const table = await screen.findByRole('table', { name: 'Base URL' })
+  expect(
+    within(table)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+  ).toEqual(['API', 'API Base URL', 'Common clients'])
+  const rows = within(table).getAllByRole('row')
+  expect(rows).toHaveLength(3)
+  const entries = [
+    {
+      row: rows[1],
+      api: 'OpenAI-compatible API',
+      url: `${window.location.origin}/v1`,
+      clients: 'OpenAI SDK, LangChain, and most agent frameworks',
+    },
+    {
+      row: rows[2],
+      api: 'Anthropic-compatible API',
+      url: window.location.origin,
+      clients: 'Anthropic SDK, Claude Code',
+    },
+  ]
+  for (const entry of entries) {
+    expect(
+      within(entry.row)
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent)
+    ).toEqual([entry.api, entry.url, entry.clients])
+    expect(within(entry.row).getByText(entry.url)).toHaveClass('break-all')
+    const button = within(entry.row).getByRole('button', {
+      name: `Copy API URL: ${entry.url}`,
+    })
+    button.focus()
+    await user.keyboard('{Enter}')
+    expect(copy).toHaveBeenLastCalledWith(entry.url)
+    expect(
+      await within(entry.row).findByRole('button', { name: 'Copied' })
+    ).toBeVisible()
+  }
+  expect(table).toHaveClass('min-w-[36rem]', 'table-fixed')
+  expect(table.parentElement).toHaveClass('overflow-x-auto')
+})
+
 test('example tabs switch language by keyboard and copy code using the current origin and port', async () => {
   const user = userEvent.setup()
   const copy = vi.fn().mockResolvedValue(undefined)
@@ -240,7 +287,7 @@ test('example tabs switch language by keyboard and copy code using the current o
   expect(copy.mock.calls[0][0]).not.toContain('https://configured.example:8443')
 })
 
-test('switching the interface language updates the document heading', async () => {
+test('switching the interface language updates the document heading and API address table', async () => {
   renderPage()
   expect(
     await screen.findByRole('heading', { name: 'API overview', level: 1 })
@@ -249,5 +296,18 @@ test('switching the interface language updates the document heading', async () =
   await act(() => i18next.changeLanguage('zhCN'))
   expect(
     screen.getByRole('heading', { name: 'API 概览', level: 1 })
+  ).toBeVisible()
+  const table = screen.getByRole('table', { name: 'API 地址' })
+  expect(
+    within(table).getByRole('columnheader', { name: 'API 基础 URL' })
+  ).toBeVisible()
+  expect(
+    within(table).getByRole('columnheader', { name: '常见客户端' })
+  ).toBeVisible()
+  expect(
+    within(table).getByRole('cell', { name: 'OpenAI 兼容 API' })
+  ).toBeVisible()
+  expect(
+    within(table).getByRole('cell', { name: 'Anthropic 兼容 API' })
   ).toBeVisible()
 })

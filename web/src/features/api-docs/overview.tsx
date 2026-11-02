@@ -36,20 +36,66 @@ import { API_DOCS } from './reference'
 export function ApiOverview() {
   const { t } = useTranslation()
   const origin = window.location.origin
+  const apiEntries = [
+    {
+      api: t('OpenAI-compatible API'),
+      url: `${origin}/v1`,
+      clients: t('OpenAI SDK, LangChain, and most agent frameworks'),
+    },
+    {
+      api: t('Anthropic-compatible API'),
+      url: origin,
+      clients: t('Anthropic SDK, Claude Code'),
+    },
+  ]
 
   return (
     <div className='space-y-10'>
       <section id='base-url' className='scroll-mt-24 space-y-4'>
-        <h2 className='text-xl font-semibold'>{t('Base URL')}</h2>
-        <p className='text-muted-foreground leading-7'>
-          {t(
-            'Use the current site origin for HTTP requests. OpenAI SDK clients use the origin followed by /v1; Anthropic clients use the origin without /v1.'
-          )}
-        </p>
-        <div className='bg-muted/30 flex min-w-0 items-center justify-between gap-3 rounded-lg border px-4 py-3'>
-          <code className='min-w-0 text-sm break-all'>{`${origin}/v1`}</code>
-          <CopyButton value={`${origin}/v1`} aria-label={t('Copy API URL')} />
-        </div>
+        <h2 id='base-url-title' className='text-xl font-semibold'>
+          {t('Base URL')}
+        </h2>
+        <StaticDataTable
+          tableClassName='min-w-[36rem] table-fixed'
+          tableProps={{ 'aria-labelledby': 'base-url-title' }}
+        >
+          <TableHeader className='bg-muted/50'>
+            <TableRow>
+              <TableHead scope='col' className='w-1/4 border-r px-4'>
+                {t('API')}
+              </TableHead>
+              <TableHead scope='col' className='w-2/5 border-r px-4'>
+                {t('API Base URL')}
+              </TableHead>
+              <TableHead scope='col' className='px-4'>
+                {t('Common clients')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {apiEntries.map((entry) => (
+              <TableRow key={entry.api}>
+                <TableCell className='border-r px-4 py-3 whitespace-normal'>
+                  {entry.api}
+                </TableCell>
+                <TableCell className='border-r px-4 py-3 whitespace-normal'>
+                  <div className='flex min-w-0 items-center justify-between gap-2'>
+                    <code className='bg-muted min-w-0 rounded px-2 py-1 break-all'>
+                      {entry.url}
+                    </code>
+                    <CopyButton
+                      value={entry.url}
+                      aria-label={`${t('Copy API URL')}: ${entry.url}`}
+                    />
+                  </div>
+                </TableCell>
+                <TableCell className='px-4 py-3 whitespace-normal'>
+                  {entry.clients}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </StaticDataTable>
         <Alert>
           <AlertDescription>
             {t(
