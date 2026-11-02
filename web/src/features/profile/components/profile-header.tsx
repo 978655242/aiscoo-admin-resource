@@ -23,7 +23,6 @@ import { StatusBadge } from '@/components/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { UserAvatar } from '@/components/user-avatar'
-import { formatCompactNumber, formatQuota } from '@/lib/format'
 import { getRoleLabel } from '@/lib/roles'
 
 import { getDisplayName } from '../lib'
@@ -39,19 +38,10 @@ export function ProfileHeader(props: ProfileHeaderProps) {
   const profile = props.profile
   if (!props.loading && !profile) return null
 
-  const stats = [
-    { label: t('Current Balance'), value: formatQuota(profile?.quota ?? 0) },
-    { label: t('Total Usage'), value: formatQuota(profile?.used_quota ?? 0) },
-    {
-      label: t('API Requests'),
-      value: formatCompactNumber(profile?.request_count ?? 0),
-    },
-  ]
-
   return (
     <section aria-label={t('Profile')} aria-busy={props.loading}>
       <Card data-card-hover='false' className='gap-0 py-0 shadow-none'>
-        <CardContent className='flex min-w-0 flex-col gap-4 p-4 sm:p-5 @min-[52rem]/profile:flex-row @min-[52rem]/profile:items-center @min-[52rem]/profile:justify-between @min-[52rem]/profile:gap-6'>
+        <CardContent className='min-w-0 p-4 sm:p-5'>
           <div className='flex min-w-0 flex-1 items-center gap-3'>
             {props.loading ? (
               <>
@@ -106,23 +96,6 @@ export function ProfileHeader(props: ProfileHeaderProps) {
               )
             )}
           </div>
-
-          <dl className='grid grid-cols-3 gap-3 border-t pt-4 @min-[52rem]/profile:w-80 @min-[52rem]/profile:shrink-0 @min-[52rem]/profile:border-t-0 @min-[52rem]/profile:border-l @min-[52rem]/profile:pt-0 @min-[52rem]/profile:pl-6'>
-            {stats.map((stat) => (
-              <div key={stat.label} className='min-w-0'>
-                <dt className='text-muted-foreground text-xs leading-relaxed'>
-                  {stat.label}
-                </dt>
-                <dd className='mt-1 text-base font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums'>
-                  {props.loading ? (
-                    <Skeleton className='h-6 w-16 max-w-full' />
-                  ) : (
-                    stat.value
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
         </CardContent>
       </Card>
     </section>
