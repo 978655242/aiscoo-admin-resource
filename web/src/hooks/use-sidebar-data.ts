@@ -154,7 +154,7 @@ export function useSidebarData(): SidebarData {
           },
           // XCODE: Aiscoo 桌面版本独立管理入口，复用 root 管理员权限。
           {
-            title: t('Version Management'),
+            title: t('Versions'),
             url: '/desktop-releases',
             icon: Download,
             requiredRole: ROLE.SUPER_ADMIN,

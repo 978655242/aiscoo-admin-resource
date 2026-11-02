@@ -315,6 +315,18 @@ describe('release rollout editing', () => {
   })
 })
 
+describe('release confirmation width', () => {
+  test('the dialog replaces the base width rule instead of sitting beside it', () => {
+    operation(release(), 'publish')
+    const dialog = screen.getByRole('alertdialog')
+    // The dialog's own `data-[size=default]:sm:max-w-sm` is a different variant
+    // from a bare `sm:max-w-xl`, so tailwind-merge keeps both and the narrower
+    // one wins. The widened rule must use the same variant.
+    expect(dialog).toHaveClass('data-[size=default]:sm:max-w-xl')
+    expect(dialog).not.toHaveClass('data-[size=default]:sm:max-w-sm')
+  })
+})
+
 describe('release action confirmations', () => {
   test.each([
     {
