@@ -18,7 +18,7 @@ const (
 	ClientPurposeZen       = "xcode"
 
 	SubscriptionUsageScopeGeneral = "general"
-	SubscriptionUsageScopeZen     = "xcode"
+	SubscriptionUsageScopeZen     = "zen"
 )
 
 // ZenAuthorization identifies the designated subscription, not a second balance.

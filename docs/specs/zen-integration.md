@@ -72,14 +72,16 @@ flowchart LR
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UserSession`                  | `ClientPurpose`：空/`dashboard` 为原生，`xcode` 为客户端专用；服务端签发，普通请求不可修改。进入缓存和 Session 校验                                                                         |
 | `Token`                        | `ClientPurpose` 与 `ClientSessionSID`：aiscoo 客户端托管 key 固定为 `xcode`，链接同用户的专用 Session；名称只用于展示。关联缺失也不能降级为普通 key                                                |
-| `UserSubscription`             | `UsageScope`：空/general 为原生通用，xcode 为专用且不可改回。专用实例增加不可变 `QuotaResetPeriodSnapshot` / `QuotaResetCustomSecondsSnapshot`，以及 `QuotaResetGeneration`；不复制余额账本 |
+| `UserSubscription`             | `UsageScope`：空/general 为原生通用，zen 为专用且不可改回。专用实例增加不可变 `QuotaResetPeriodSnapshot` / `QuotaResetCustomSecondsSnapshot`，以及 `QuotaResetGeneration`；不复制余额账本 |
 | 新 `ZenAuthorization`        | `UserId` 唯一；`SubscriptionId` 指向最近指定实例；`Revision`、更新时间。无实例时 revision 为 0；有效性从真实实例状态及数据库时间判断，不复制额度                                            |
 | `Model` 元数据                 | `ZenConfig` TEXT，保存 §7 的版本化 JSON。管理员维护；官方描述同步、非相关字段编辑不得覆盖它                                                                                               |
-| `SubscriptionPreConsumeRecord` | 专用请求增加 `FundingScope`、`ResetGeneration`、`CycleReservedQuota`、`FinalQuota`；Status 扩展 settled，统一保存本请求预扣/追加预留/结算/退款事实。沿用原表，不新建周期余额账本            |
+| `SubscriptionPreConsumeRecord` | 专用请求增加 `FundingScope=zen`、`ResetGeneration`、`CycleReservedQuota`、`FinalQuota`；Status 扩展 settled，统一保存本请求预扣/追加预留/结算/退款事实。沿用原表，不新建周期余额账本            |
 
 原生 `UserSubscription` 的 `AmountTotal/AmountUsed/StartTime/EndTime/LastResetTime/NextResetTime` 仍为唯一计费事实。不要在授权关系中保存可独立扣减的剩余额度。
 
 使用 GORM 迁移，兼容 SQLite、MySQL ≥5.7.8、PostgreSQL ≥9.6。已有行按原生用途解释；不改写既有订阅归属，不自动创建 aiscoo 客户端授权。唯一性使用普通 UserId 唯一索引及事务，不依赖 partial index、数据库 enum 或 `default:true`。
+
+订阅协议值统一为 `usage_scope=zen`、`quota.scope=zen-subscription`。主节点启动时，在同一事务内将历史 `user_subscriptions.usage_scope=xcode` 和 `subscription_pre_consume_records.funding_scope=xcode` 迁移为 `zen`；仅精确匹配旧值，保留 ID、额度、周期、状态、时间戳及授权 revision，重复启动不重复改变数据。客户端与服务端须同步升级，切换前停止旧版本请求处理，避免旧程序继续读写旧资金域。凭据 `ClientPurpose=xcode`、既有路由、错误码、表名与列名保留。
 
 Token Redis hash 的现有固定字段编码必须加入 ClientPurpose/ClientSessionSID 和明确 cache schema version；Session cache 同样包含 ClientPurpose。旧 schema、字段缺失或未知 purpose 作为不可信 cache miss 回源数据库，不能用空值当 general。切换缓存 schema/namespace 时清理旧 hash，复用 mutation fence，冷启动/热缓存/缺字段路径行为一致；禁用入口也不绕过分类。依据 [Token cache 序列化](../../model/token_cache.go#L56)。
 
@@ -117,7 +119,7 @@ Token Redis hash 的现有固定字段编码必须加入 ClientPurpose/ClientSes
 
 client_id 是公开标识，不是 secret。桌面 `xcode-desktop` 仅允许上述四个完整回调 URI，按原始字符串精确匹配；拒绝大小写变体、userinfo、端口、query、fragment、转义路径和尾斜杠。服务端现无 dev/preview 专用开关，三个 Aiscoo 回调沿用现有 `XCODE_INTEGRATION_ENABLED` 与 `XCODE_PUBLIC_ORIGIN` 入口控制，不新增通配 scheme 或环境回退。授权网页仅为桌面客户端分发这四种回调及原有三个查询参数，不扩展 Web origin 或 CLI。独立 CLI 注册为 `xwork-cli`，仅允许 `http://127.0.0.1:<port>/oauth/callback`，port 为 1–65535 的规范十进制；禁止 localhost/其他 IP 表示、userinfo、query、fragment、转义路径和尾斜杠。CLI 必须先绑定系统分配的回环端口，再发起授权；浏览器须与 CLI 在同一台机器。完整 redirect_uri 与 client_id 绑定 AuthFlow 和 code，兑换时精确一致；即使是同一桌面客户端已登记的其他回调也不能换用或借重放撤销会话。不支持任意 redirect_uri、通配 scheme/host 或动态第三方客户端注册。PKCE 必須是 S256，不能回退 plain。
 
-专用 UserSession 持久化 client_id；旧 xcode-purpose 会话的空值仅解释为 xcode-desktop。refresh 与使用 refresh 凭据的 logout 必须匹配签发客户端；不匹配时不轮换、不撤销。control 凭据 logout 只操作已验证的自身 SID。客户端标识不改变 xcode 资金用途、指定套餐与 managed key 范围。
+专用 UserSession 持久化 client_id；旧 xcode-purpose 会话的空值仅解释为 xcode-desktop。refresh 与使用 refresh 凭据的 logout 必须匹配签发客户端；不匹配时不轮换、不撤销。control 凭据 logout 只操作已验证的自身 SID。客户端标识不改变 zen 资金用途、指定套餐与 managed key 范围。
 
 CLI 登录采用原生浏览器授权和独立 SID；不复制桌面密钥或会话。适用 OWASP Authentication、Session Management、OAuth2 Cheat Sheets：保留原生认证强度、S256 与 state、精确回调匹配、单次且有期限的 code、刷新轮换与撤销、服务端客户端归属校验，审计不记录可用凭据。本增量不声称对全产品作 ASVS 合规认证。
 
@@ -165,13 +167,13 @@ Session 授权与多节点撤销语义沿用 [认证文档](../authentication.md
 
 在原生套餐管理的用户订阅界面，上方区域标题为“aiscoo 客户端专属订阅”（英文 `aiscoo client-exclusive subscription`；原规范标题为“XWork专属订阅”，英文 `XWork-exclusive subscription`），下方普通订阅区域标题为“通用订阅”（英文 `General subscriptions`）；复用模板列表与原生实例显示，不另做后台。本次仅调整两个区域标题，不改变授权、计费、按钮或协议标识；原普通授予/订单订阅保留为 general，不能靠普通“绑定套餐”动作自动指定。
 
-- **grant**：无当前有效指定授权才可执行；从启用模板新建 `Source=admin`、`UsageScope=xcode` 的实例，立即生效。
+- **grant**：无当前有效指定授权才可执行；从启用模板新建 `Source=admin`、`UsageScope=zen` 的实例，立即生效。
 - **renew**：必须与最近指定实例的 PlanId 相同。若仍有效，保持实例 ID、AmountTotal、AmountUsed、LastResetTime 和周期进度；新 end_time = 原 end_time + 当前模板一个 duration。若已到期，新建实例，不恢复原已用额度。
 - **replace**：必须与当前有效指定实例 PlanId 不同。事务内取消旧实例，再创建新实例、更新关系及原生分组；新实例用完整模板预算/时长，无折算、无结转。
 - **revoke**：取消当前指定实例；保留实例及关系历史。禁止模型请求，但主账号和账号级用量读取仍可用。
 - **reset**：只重置当前指定实例；复用原生 quota reset 算法、审计和 `advance_reset_time` 语义。不得调用按 user+plan 重置全部实例的方法而连带重置 general 实例。
 
-被撤销/取消的实例不通过 renew 复活；再次授予使用 grant 创建新实例。原生管理员失效/删除入口也必须维护指定关系和 revision；被指定关系、预扣记录或在途任务引用的 xcode 实例禁止硬删除，返回冲突并引导取消，避免丢失结算/退款事实。
+被撤销/取消的实例不通过 renew 复活；再次授予使用 grant 创建新实例。原生管理员失效/删除入口也必须维护指定关系和 revision；被指定关系、预扣记录或在途任务引用的 zen 实例禁止硬删除，返回冲突并引导取消，避免丢失结算/退款事实。
 
 保留原生付款合规确认及模板校验，不绕过。aiscoo 客户端使用的模板 `MaxPurchasePerUser` 必须为 0；否则明确报模板配置错误，避免原生“累计历史购买次数”限制阻止到期新授予。不要把该字段设为 1 来表达“一个有效授权”。
 
@@ -186,20 +188,20 @@ Session 授权与多节点撤销语义沿用 [认证文档](../authentication.md
 | 请求来源                      | 可用订阅                                                         | 钱包           |
 | ----------------------------- | ---------------------------------------------------------------- | -------------- |
 | 普通原生 key / 原生其他客户端 | 仅 UsageScope 空/general；原生候选顺序与 billing_preference 保留 | 按原生策略允许 |
-| aiscoo 客户端托管 key                | 仅当前指定且属于同用户的 xcode 实例                              | 永不使用       |
+| aiscoo 客户端托管 key                | 仅当前指定且属于同用户的 zen 实例                              | 永不使用       |
 
 在共享入口实施，不在一个 controller 打补丁：
 
 1. `TokenAuth/SetupContextForToken` 建立服务端可信的 managed-client 上下文并校验当前有效指定授权；客户端 header、body、billing_preference、key 名称均不能指定资金域或 subscription_id。免费模型、预扣 0 和快速/可信路径也必须在模型运行前执行此授权校验，不能绕过。
 2. `RelayInfo` / `NewBillingSession` 对托管请求强制 subscription-only，将本次 admission 确认的唯一实例 ID/revision 传递到 `SubscriptionFunding.PreConsume`，不执行钱包兜底，不在价格估算后悄悄换到另一授权。
-3. `PreConsumeUserSubscription` 使用显式 scope/目标；general 查询排除全部 xcode 实例，managed 查询只锁指定 ID，重新校验当前指定关系、归属、scope、status、end_time，执行原生懒重置与额度检查。并发替换后目标不再有效时拒绝本次 admission。
+3. `PreConsumeUserSubscription` 使用显式 scope/目标；general 查询排除全部 zen 实例，managed 查询只锁指定 ID，重新校验当前指定关系、归属、scope、status、end_time，执行原生懒重置与额度检查。并发替换后目标不再有效时拒绝本次 admission。
 4. `HasActiveUserSubscription`、`UserActiveSubscriptionsAllowWalletOverflow` 及所有 wallet_first/subscription_first 回退检查也按 general 过滤。专用实例的 overflow=false 不能改变普通 key 的回退结果。
 5. aiscoo 客户端实例 `AllowWalletOverflow=false`，托管 token 不设可覆盖资金来源的独立预算。原生用户 billing_preference 不因 aiscoo 客户端登录/请求而被改写。
 6. 预扣幂等记录的 user、资金域及实例必须匹配；不能复用另一个用户/资金域的 request_id 记录。预扣事实一旦建立，追加 reserve、settle、refund 均沿记录中的原实例 ID。
 7. 换套餐/撤销后的在途请求允许结算或退款到旧实例；不能将旧请求扣到新套餐，也不能因旧实例 cancelled 而拒绝应有退款。新 admission 不再使用旧实例。
 8. 继承原生额度不足、实际消耗补扣、退款及饱和审计行为。错误改为明确类型/代码，不依赖新增错误恰好含旧 substring 来决定是否钱包回退。
 
-普通原生请求的任务、图片、视频及异步计费路径也必须排除 xcode 专用实例。aiscoo 客户端托管 key 本期只允许 §6.5 的三种 Agent 推理路由；不开放 Midjourney、图片生成、视频/task API。已有这些功能使用的独立 API Provider/凭据不改。
+普通原生请求的任务、图片、视频及异步计费路径也必须排除 zen 专用实例。aiscoo 客户端托管 key 本期只允许 §6.5 的三种 Agent 推理路由；不开放 Midjourney、图片生成、视频/task API。已有这些功能使用的独立 API Provider/凭据不改。
 
 用途/精确 method+route 的 allowlist 必须覆盖所有 key 认证入口：TokenAuth、TokenAuthReadOnly、TokenOrUserAuth、TokenOrTaskArtifactAccessAuth 及插件/能力分发的 key 分支。不得仅依赖 SetupContextForToken。托管 key 访问 `/api/usage/token/`、`/api/log/token`、旧 billing dashboard、models-list、task/artifact API 均拒绝；原普通 key 的 readonly/过期查询语义不变。独立 route-bound capability 保留原用途，不能因加入 allowlist 放宽。
 
@@ -207,14 +209,14 @@ Session 授权与多节点撤销语义沿用 [认证文档](../authentication.md
 
 ### 5.3 跨重置周期的结算
 
-用户已确认：请求归最终结算时的周期。例：原周期预扣 100 → 重置清已用量 → 实际费用 150，当前周期扣完整 150，不只补 50。此策略仅用于 xcode 专用实例；不扩展为改造 general 订阅的跨周期计费策略。
+用户已确认：请求归最终结算时的周期。例：原周期预扣 100 → 重置清已用量 → 实际费用 150，当前周期扣完整 150，不只补 50。此策略仅用于 zen 专用实例；不扩展为改造 general 订阅的跨周期计费策略。
 
 - 新建专用实例 generation=1；实际自动/管理员/懒重置在清 AmountUsed 的同一实例锁事务内递增 generation。never 不自动递增，管理员 reset 仍递增；续期不递增。周期边界未实际执行时，结算先执行应有懒重置再决定当前 generation。
 - 每个专用预扣记录绑定原 subscription ID，保存当前已占用 generation 和 CycleReservedQuota（包括追加 reserve）。保留原 PreConsumed 用于原生审计，不把内存 extraReserved 当作另一份权威记录。
 - reserve、settle、refund、reserve rollback 按实例 → 该 request 的预扣记录持锁。若记录 generation 落后，旧占用已被 reset 消除，在当前 generation 的占用视为 0；不能把旧预扣再次退给新周期，或当作抵扣。
 - `Reserve(targetTotal)`：将本请求当前周期占用调整到完整目标预留量，不只加“旧目标的差额”。资金与记录一起更新；token 更新失败的 rollback 也必须核对 generation，不能扣减重置后别的请求用量。
 - `Settle(actualQuota)`：当前 AmountUsed 调整量为 actualQuota - 本请求当前 generation 的 CycleReservedQuota；跨周期记录按 0 预留计算。资金/FinalQuota/记录 generation/Status=settled 在同事务提交。重复结算不再扣。即使实际费用等于原预扣、旧 delta=0，也必须进行 generation 校验和结算，不能提前 return。
-- `Refund`：仅减去本请求在当前 generation 的未结算占用；已被重置清除的旧占用不减当前 AmountUsed。Status=refunded 同事务幂等更新。xcode 追加预留已在记录中，不再执行原额外 PostConsumeDelta(-extraReserved) 的第二次退款。
+- `Refund`：仅减去本请求在当前 generation 的未结算占用；已被重置清除的旧占用不减当前 AmountUsed。Status=refunded 同事务幂等更新。zen 追加预留已在记录中，不再执行原额外 PostConsumeDelta(-extraReserved) 的第二次退款。
 - Shared FundingSource/调用者要传完整 actualQuota 和总预扣语义，不能让专用资金来源只收到 delta；统一迁移调用签名，普通 wallet/general 仍按原规则算差额。专用请求不落入无 request/generation 的 legacy delta-only 结算。
 - 结算仍固定原实例：replace 后不把旧请求转到 B；旧 A 若已 cancelled/expired，只使用其最后实际生效 generation，不延长寿命、不创建到期后的新周期。仍保留正常在途结算/退款。
 - 原实例当期额度不足时沿用原生结算失败/审计，事务不伪造成功或扣到别的资金；已发送的流式内容不能撤回，应记录实际结算失败，而非假称用户一定已付费。积分/退款归属不由前端决定。
@@ -293,8 +295,8 @@ AuthorizationSnapshot：
 读取指定实例时执行与预扣共用的原生到期/懒重置校验，以实例锁内的数据库时间为准；不能只在返回 JSON 中把过期周期的 used 虚拟清零。自动重置不清主账号登录，也不制造用户 reset 机会。
 
 - `status`: unassigned / active / exhausted / expired / revoked；`authorization_revision`。
-- `subscription`: null 或 `{id,plan_id,plan_title,source:"admin",usage_scope:"xcode",start_time,end_time}`。
-- `quota`: null 或 `{scope:"xcode-subscription",unit:"quota",unlimited,total,used,remaining,used_percentage,reset_period,reset_custom_seconds,last_reset_time,next_reset_time,reset_time_zone,reset_utc_offset_seconds}`。
+- `subscription`: null 或 `{id,plan_id,plan_title,source:"admin",usage_scope:"zen",start_time,end_time}`。
+- `quota`: null 或 `{scope:"zen-subscription",unit:"quota",unlimited,total,used,remaining,used_percentage,reset_period,reset_custom_seconds,last_reset_time,next_reset_time,reset_time_zone,reset_utc_offset_seconds}`。
 - unlimited 来自原生 AmountTotal=0：total/remaining/used_percentage 为 null，used 为真实计数；不能显示“0 额度”。有限额度 percentage = used/total×100（已用比例，显示上可 clamp），remaining=max(total-used,0)。
 - reset_time_zone 显示原生服务端时区；无 IANA 名称时为 server-local，附当前 offset。重置时间以服务端 next_reset_time 为权威，客户端不按自身时区重建。
 - `funding_policy={subscription_only:true,wallet_fallback:false,other_subscription_fallback:false}`；`self_service_reset=false`；`purchase_mode=manual_admin`。
@@ -442,7 +444,7 @@ web-handoff 是 60 秒、单次、同用户/SID/用途绑定的 AuthFlow。消�
 
 部署增加单个 `XCODE_INTEGRATION_ENABLED` 入口开关及显式 `XCODE_PUBLIC_ORIGIN`。本期 origin 为已观察的 loopback 服务地址；不能读取不正确的 server_address 或无条件信任 forwarded host。关闭入口后依然保留托管 key 用途拒绝及资金 scope 隔离，不能把 key/订阅变回 general。
 
-不存在安全的直接回滚到不知道 purpose/scope 的旧二进制：它可能允许 key 或扣专用预算。回滚前必须撤销客户端 Session/key、取消所有有效 xcode 专用实例，确认没有可被旧版本误用的预算；数据/审计保留。运行镜像/二进制来源及挂载需在实施部署时重新核实，更新或重启既有服务必须有明确部署授权。
+不存在安全的直接回滚到不知道 purpose/scope 的旧二进制：它可能允许 key 或扣专用预算。回滚前必须撤销客户端 Session/key、取消所有有效 zen 专用实例，确认没有可被旧版本误用的预算；数据/审计保留。运行镜像/二进制来源及挂载需在实施部署时重新核实，更新或重启既有服务必须有明确部署授权。
 
 ## 11. 可执行验收矩阵
 
@@ -457,7 +459,7 @@ web-handoff 是 60 秒、单次、同用户/SID/用途绑定的 AuthFlow。消�
 | 并发管理员操作                       | 相同 expected_revision 仅一项提交；另一项 409；无重复续期或两份有效专用实例                                                                             |
 | 普通 key + xcode/general/wallet 共存 | 所有 billing_preference 模式只用 general/wallet；专用 overflow=false 不影响普通回退                                                                     |
 | aiscoo 客户端额度耗尽 + 钱包/其他订阅充足   | 仍拒绝；钱包/其他订阅未变，实际 consume log 标明原指定实例                                                                                              |
-| 同模板 general 与 xcode 实例 reset   | aiscoo 客户端单实例 reset 只改变专用实例；原生明确批量操作保留其原语义                                                                                         |
+| 同模板 general 与 zen 实例 reset   | aiscoo 客户端单实例 reset 只改变专用实例；原生明确批量操作保留其原语义                                                                                         |
 | 周期快照                             | grant 后编辑模板周期/时长，原专用实例周期快照及 renew 锚点不变；新 grant/replace 才取得新周期                                                           |
 | 跨周期 settle / refund / reserve     | 预扣100→reset→actual150，当期增加150；actual100也必须增加100；旧预扣退款不减少新周期其他请求额度；追加reserve/rollback不跨代误扣，重复settle/refund幂等 |
 | 热缓存与 key 旁路                    | 热 Redis/旧 hash/缺 purpose 都不能使托管 key 成 general；readonly token、旧dashboard及能力/token分支均遵守精确推理 allowlist                            |

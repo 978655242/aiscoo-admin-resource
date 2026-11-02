@@ -285,12 +285,12 @@ func testZenStartupMigration(t *testing.T, dialect, dsn, origin string) {
 	}
 	managedSubscription := UserSubscription{
 		UserId: 84, PlanId: 9, AmountTotal: 1000, AmountUsed: 43, Status: "active", Source: "admin",
-		UsageScope: "xcode", QuotaResetPeriodSnapshot: "custom",
+		UsageScope: SubscriptionUsageScopeZen, QuotaResetPeriodSnapshot: "custom",
 		QuotaResetCustomSecondsSnapshot: 18000,
 	}
 	managedPreConsume := SubscriptionPreConsumeRecord{
 		RequestId: "managed-request", UserId: 84, PreConsumed: 45, Status: "settled",
-		FundingScope: "xcode", ResetGeneration: 1, CycleReservedQuota: 43, FinalQuota: 43,
+		FundingScope: SubscriptionUsageScopeZen, ResetGeneration: 1, CycleReservedQuota: 43, FinalQuota: 43,
 	}
 	completeConfig := `{"schema_version":1,"api_type":"openai-chat-completions","model_config":{"enabled":false,"properties":{"requiresMfjsToolSchema":false,"contextWindow":8192,"inputFormat":{"supportsText":false,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":false},"supportsToolCall":false,"supportsJsonSchemaOutput":false,"supportsNativeWebSearch":false,"supportsMidConversationSystem":false},"optionSpecs":{"reasoningLevel":{"values":["off"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{}"}}}}`
 	fullConfig := completeConfig + strings.Repeat(" ", 65536-len(completeConfig))
@@ -299,7 +299,29 @@ func testZenStartupMigration(t *testing.T, dialect, dsn, origin string) {
 	managedModel := Model{ModelName: "managed-model", ZenConfig: LongText(fullConfig)}
 	authorization := ZenAuthorization{UserId: 84, Revision: 1}
 	operation := ZenRevokeOperation{OperationHash: strings.Repeat("a", 64), CredentialHash: strings.Repeat("b", 64), UserID: 84, SessionID: "xcode-sid", ClientID: "xcode-desktop", ExpiresAt: 4102444800, Result: "committed"}
-	for pass := range 2 {
+	scopeCases := []struct {
+		name         string
+		legacy       any
+		expected     string
+		subStatus    string
+		recordStatus string
+	}{
+		{"active_pending", "xcode", "zen", "active", "consumed"},
+		{"expired_pending", "xcode", "zen", "expired", "consumed"},
+		{"cancelled_pending", "xcode", "zen", "cancelled", "consumed"},
+		{"settled", "xcode", "zen", "cancelled", "settled"},
+		{"refunded", "xcode", "zen", "expired", "refunded"},
+		{"general", "general", "general", "active", "consumed"},
+		{"empty", "", "", "active", "consumed"},
+		{"null", nil, "", "active", "consumed"},
+		{"already_zen", "zen", "zen", "active", "consumed"},
+		{"unknown", "unknown", "unknown", "active", "consumed"},
+		{"uppercase", "XCODE", "XCODE", "active", "consumed"},
+		{"trailing_space", "xcode ", "xcode ", "active", "consumed"},
+	}
+	scopeSubscriptions := make([]UserSubscription, len(scopeCases))
+	scopeRecords := make([]SubscriptionPreConsumeRecord, len(scopeCases))
+	for pass := range 3 {
 		err := InitDB()
 		db = DB
 		connections = append(connections, db)
@@ -385,6 +407,28 @@ func testZenStartupMigration(t *testing.T, dialect, dsn, origin string) {
 		} {
 			require.NoError(t, db.First(row.saved, row.id).Error)
 			assert.Equal(t, row.expected, row.saved, "new aiscoo zen fields must survive production restart")
+			if saved, ok := row.saved.(*UserSubscription); ok {
+				assert.Equal(t, "zen", saved.UsageScope)
+			}
+			if saved, ok := row.saved.(*SubscriptionPreConsumeRecord); ok {
+				assert.Equal(t, "zen", saved.FundingScope)
+			}
+		}
+		if pass > 0 {
+			for i, scope := range scopeCases {
+				var sub UserSubscription
+				var record SubscriptionPreConsumeRecord
+				require.NoError(t, db.First(&sub, scopeSubscriptions[i].Id).Error)
+				require.NoError(t, db.First(&record, scopeRecords[i].Id).Error)
+				assert.Equal(t, scopeSubscriptions[i], sub, "%s: only the legacy subscription scope may change", scope.name)
+				assert.Equal(t, scopeRecords[i], record, "%s: only the legacy ledger scope may change", scope.name)
+				if scope.legacy == nil {
+					require.NoError(t, db.Model(&UserSubscription{}).Where("id = ? AND usage_scope IS NULL", sub.Id).Count(&count).Error)
+					assert.EqualValues(t, 1, count)
+					require.NoError(t, db.Model(&SubscriptionPreConsumeRecord{}).Where("id = ? AND funding_scope IS NULL", record.Id).Count(&count).Error)
+					assert.EqualValues(t, 1, count)
+				}
+			}
 		}
 		for _, index := range []struct {
 			entity any
@@ -415,12 +459,78 @@ func testZenStartupMigration(t *testing.T, dialect, dsn, origin string) {
 		require.Error(t, db.Create(&ZenAuthorization{
 			UserId: 84, SubscriptionId: nativeSubscription.Id, Revision: 1,
 		}).Error, "only one designated aiscoo zen relationship per user")
+		if pass == 0 {
+			// Seed the deployed discriminator without invoking current creation/update hooks.
+			require.NoError(t, db.Model(&UserSubscription{}).Where("id = ?", managedSubscription.Id).UpdateColumn("usage_scope", "xcode").Error)
+			require.NoError(t, db.Model(&SubscriptionPreConsumeRecord{}).Where("id = ?", managedPreConsume.Id).UpdateColumn("funding_scope", "xcode").Error)
+			now := time.Now().Unix()
+			for i, scope := range scopeCases {
+				sub := &scopeSubscriptions[i]
+				*sub = UserSubscription{
+					UserId: 85 + i, PlanId: 9, Source: "admin", Status: scope.subStatus,
+					UsageScope: scope.expected, AmountTotal: 1000, AmountUsed: 20,
+					QuotaResetPeriodSnapshot: SubscriptionResetNever, QuotaResetGeneration: 7,
+					StartTime: now - 3600, EndTime: now + 7200, LastResetTime: now - 3600,
+					CreatedAt: 1700000000, UpdatedAt: 1700000010,
+				}
+				if scope.subStatus != "active" {
+					sub.EndTime = now - 1
+				}
+				record := &scopeRecords[i]
+				*record = SubscriptionPreConsumeRecord{
+					RequestId: "scope-" + scope.name, UserId: sub.UserId, FundingScope: scope.expected,
+					PreConsumed: 20, ResetGeneration: 7, CycleReservedQuota: 20, Status: scope.recordStatus,
+					CreatedAt: 1700000000, UpdatedAt: 1700000010,
+				}
+				if scope.recordStatus == "settled" {
+					record.FinalQuota = 20
+				} else if scope.recordStatus == "refunded" {
+					sub.AmountUsed, record.CycleReservedQuota = 0, 0
+				}
+				require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(sub).Error)
+				record.UserSubscriptionId = sub.Id
+				require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(record).Error)
+				if i == 0 {
+					require.NoError(t, db.Create(&ZenAuthorization{UserId: sub.UserId, SubscriptionId: sub.Id, Revision: 1}).Error)
+				}
+				require.NoError(t, db.Model(&UserSubscription{}).Where("id = ?", sub.Id).UpdateColumn("usage_scope", scope.legacy).Error)
+				require.NoError(t, db.Model(&SubscriptionPreConsumeRecord{}).Where("id = ?", record.Id).UpdateColumn("funding_scope", scope.legacy).Error)
+			}
+		}
 	}
+	pending := scopeRecords[0]
+	target := SubscriptionFundingTarget{Scope: "zen", SubscriptionID: pending.UserSubscriptionId, AuthorizationRevision: 1}
+	replay, err := PreConsumeUserSubscription(pending.RequestId, pending.UserId, "native-model", 0, pending.PreConsumed, target)
+	require.NoError(t, err, "a migrated in-flight request remains idempotent")
+	assert.Equal(t, pending.UserSubscriptionId, replay.UserSubscriptionId)
+	assert.EqualValues(t, 20, replay.AmountUsedAfter)
+	for _, record := range scopeRecords[:2] {
+		require.NoError(t, SettleZenSubscriptionRequest(record.RequestId, record.UserId, record.UserSubscriptionId, 30))
+		var sub UserSubscription
+		require.NoError(t, db.First(&sub, record.UserSubscriptionId).Error)
+		assert.EqualValues(t, 30, sub.AmountUsed, "migrated active and expired requests settle on their original instance")
+	}
+	cancelled := scopeRecords[2]
+	require.NoError(t, RefundZenSubscriptionRequest(cancelled.RequestId, cancelled.UserId, cancelled.UserSubscriptionId))
+	var refunded UserSubscription
+	require.NoError(t, db.First(&refunded, cancelled.UserSubscriptionId).Error)
+	assert.Zero(t, refunded.AmountUsed, "a migrated cancelled instance can still refund its in-flight request")
+	var unchangedNative zenReleaseUserSubscription
+	require.NoError(t, db.First(&unchangedNative, nativeSubscription.Id).Error)
+	assert.Equal(t, *nativeSubscription, unchangedNative, "settlement and refund never use a native subscription")
+
+	// A failure updating the ledger must roll back the subscription discriminator too.
+	require.NoError(t, db.Model(&UserSubscription{}).Where("id = ?", managedSubscription.Id).UpdateColumn("usage_scope", "xcode").Error)
+	require.NoError(t, db.Migrator().DropTable(&SubscriptionPreConsumeRecord{}))
+	require.Error(t, migrateZenSubscriptionScopes(db))
+	var rolledBack UserSubscription
+	require.NoError(t, db.First(&rolledBack, managedSubscription.Id).Error)
+	assert.Equal(t, "xcode", rolledBack.UsageScope)
 	var version string
 	query := "SELECT VERSION()"
 	if dialect == "sqlite" {
 		query = "SELECT sqlite_version()"
 	}
 	require.NoError(t, db.Raw(query).Scan(&version).Error)
-	t.Logf("database=%s version=%s origin=%s release=v1.0.0-rc.42 sha=6370b29424168039e94d40d610191e7d2e65dbf4 InitDB_starts=2 xcode_config_bytes=%d", dialect, version, origin, len(fullConfig))
+	t.Logf("database=%s version=%s origin=%s release=v1.0.0-rc.42 sha=6370b29424168039e94d40d610191e7d2e65dbf4 InitDB_starts=3 xcode_config_bytes=%d", dialect, version, origin, len(fullConfig))
 }

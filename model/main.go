@@ -405,7 +405,30 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return migrateZenSubscriptionScopes(DB)
+}
+
+func migrateZenSubscriptionScopes(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, scope := range []struct {
+			entity any
+			column string
+		}{
+			{&UserSubscription{}, "usage_scope"},
+			{&SubscriptionPreConsumeRecord{}, "funding_scope"},
+		} {
+			condition := scope.column + " = ?"
+			query := tx.Model(scope.entity).Where(condition, "xcode")
+			if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+				// Keep the indexed predicate; the exact check preserves unknown case/space variants.
+				query = query.Where("BINARY "+condition, "xcode")
+			}
+			if err := query.UpdateColumn(scope.column, SubscriptionUsageScopeZen).Error; err != nil {
+				return fmt.Errorf("migrate zen subscription %s: %w", scope.column, err)
+			}
+		}
+		return nil
+	})
 }
 
 func migrateLOGDB() error {
