@@ -254,7 +254,7 @@ func ZenAuthorizationSnapshot(state *model.ZenAuthorizationState) (*dto.ZenAutho
 		Source: "admin", UsageScope: model.SubscriptionUsageScopeZen, StartTime: start, EndTime: end,
 	}
 	result.Quota = &dto.ZenSubscriptionQuota{
-		Scope: "xcode-subscription", Unit: "quota", Unlimited: sub.AmountTotal == 0, Used: strconv.FormatInt(sub.AmountUsed, 10),
+		Scope: "zen-subscription", Unit: "quota", Unlimited: sub.AmountTotal == 0, Used: strconv.FormatInt(sub.AmountUsed, 10),
 		ResetPeriod: sub.QuotaResetPeriodSnapshot, ResetCustomSeconds: strconv.FormatInt(sub.QuotaResetCustomSecondsSnapshot, 10),
 		LastResetTime: last, NextResetTime: next, ResetTimeZone: zone, ResetUTCOffsetSeconds: offset,
 	}

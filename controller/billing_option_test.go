@@ -1061,8 +1061,13 @@ func TestZenAdministratorAuthorizationDatabaseMatrix(t *testing.T) {
 			recorder, output = mutate("grant", "0", planA.Id, nil)
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 			require.True(t, output.Success)
+			require.NotNil(t, output.Data.Subscription)
+			require.NotNil(t, output.Data.Quota)
+			assert.Equal(t, "zen", output.Data.Subscription.UsageScope)
+			assert.Equal(t, "zen-subscription", output.Data.Quota.Scope)
 			assert.Equal(t, "1", output.Data.AuthorizationRevision)
 			assert.Equal(t, "active", output.Data.Status)
+
 			assert.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 			var first model.UserSubscription
 			firstID, err := strconv.Atoi(output.Data.Subscription.ID)
