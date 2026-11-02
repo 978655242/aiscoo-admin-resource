@@ -110,6 +110,9 @@ describe('compact profile layout', () => {
       '@min-[52rem]/profile:grid-cols-[minmax(0,1fr)_18rem]'
     )
     expect(screen.getByRole('button', { name: 'Save Settings' })).toBeVisible()
+    for (const label of ['Current Balance', 'Total Usage', 'API Requests']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
+    }
   })
 
   it('keeps long account names and email readable instead of truncating them', () => {
@@ -135,11 +138,14 @@ describe('compact profile layout', () => {
     await waitFor(() => expect(copy).toHaveBeenCalledWith('13'))
   })
 
-  it('preserves three compact account statistics during loading', () => {
+  it('shows only the account summary skeleton during loading', () => {
     render(<ProfileHeader profile={null} loading />)
     const summary = screen.getByRole('region', { name: 'Profile' })
     expect(summary).toHaveAttribute('aria-busy', 'true')
-    expect(within(summary).getAllByRole('term')).toHaveLength(3)
+    expect(within(summary).queryByRole('term')).not.toBeInTheDocument()
+    for (const label of ['Current Balance', 'Total Usage', 'API Requests']) {
+      expect(within(summary).queryByText(label)).not.toBeInTheDocument()
+    }
   })
 
   it('keeps optional daily check-in in the preferences column', async () => {
