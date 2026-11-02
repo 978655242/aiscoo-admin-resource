@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Isolated contract tests for probe.py and the deployment files. Never connects to a deployment host."""
+import hashlib
 import json
 import os
 import re
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -326,6 +328,80 @@ class Tls(unittest.TestCase):
         self.assertNotEqual(self.probe('good', True, AISCOO_PROBE_TLS='off').returncode, 0)
 
 
+class ReleaseHeadChecks(unittest.TestCase):
+    """Run the workflow's release guards locally with an isolated GitHub CLI stub."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import yaml
+        except ImportError:
+            raise unittest.SkipTest('PyYAML unavailable')
+        cls.jobs = yaml.safe_load((REPO / '.github/workflows/deploy-admin.yml').read_text())['jobs']
+        cls.preflight = next(step for step in cls.jobs['deploy']['steps']
+                             if step['name'].startswith('Verify artifact digest and release HEAD'))
+        cls.postflight = next(step for step in cls.jobs['deploy']['steps']
+                              if step['name'] == 'Re-check release HEAD after deploying')
+
+    def run_guard(self, step, latest=SHA, gh_status=0, digest_matches=True):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'artifact').mkdir()
+            artifact = b'test deployment artifact'
+            (root / 'artifact/aiscoo-admin').write_bytes(artifact)
+            gh = root / 'gh'
+            gh.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$TEST_RELEASE_HEAD"\nexit "$TEST_GH_STATUS"\n')
+            gh.chmod(0o700)
+            output = root / 'output'
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                       RUNNER_TEMP=str(root), GITHUB_OUTPUT=str(output), GITHUB_SHA=SHA,
+                       GITHUB_REPOSITORY='test/repo', TEST_RELEASE_HEAD=latest, TEST_GH_STATUS=str(gh_status),
+                       EXPECTED_DIGEST=hashlib.sha256(artifact).hexdigest() if digest_matches else '0' * 64)
+            result = subprocess.run(['bash', '-c', step['run']], env=env, text=True,
+                                    capture_output=True, timeout=10)
+            return result, output.read_text() if output.exists() else ''
+
+    def test_current_release_passes_both_guards(self):
+        for step in (self.preflight, self.postflight):
+            with self.subTest(step=step['name']):
+                result, output = self.run_guard(step)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn('superseded=true', output)
+
+    def test_newer_release_skips_both_guards_without_failing(self):
+        for step in (self.preflight, self.postflight):
+            with self.subTest(step=step['name']):
+                result, output = self.run_guard(step, latest='b' * 40)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('superseded=true', output)
+
+    def test_failed_or_invalid_head_lookup_remains_a_failure(self):
+        for step in (self.preflight, self.postflight):
+            for latest, status in ((SHA, 1), ('null', 0), ('', 0)):
+                with self.subTest(step=step['name'], latest=latest, status=status):
+                    result, output = self.run_guard(step, latest=latest, gh_status=status)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn('superseded=true', output)
+
+    def test_digest_mismatch_remains_a_failure_for_an_outdated_release(self):
+        result, output = self.run_guard(self.preflight, latest='b' * 40, digest_matches=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Artifact digest differs', result.stderr)
+        self.assertNotIn('superseded=true', output)
+
+    def test_superseded_release_gates_upload_probes_and_notifications(self):
+        self.assertEqual(self.preflight.get('id'), 'preflight')
+        self.assertEqual(self.postflight.get('id'), 'postflight')
+        deploy = self.jobs['deploy']
+        self.assertEqual(deploy['outputs'].get('superseded'),
+                         '${{ steps.preflight.outputs.superseded || steps.postflight.outputs.superseded }}')
+        for step in deploy['steps'][3:]:
+            with self.subTest(step=step['name']):
+                self.assertEqual(step.get('if'), "steps.preflight.outputs.superseded != 'true'")
+        self.assertEqual(self.jobs['notify']['if'],
+                         "always() && !cancelled() && needs.deploy.outputs.superseded != 'true'")
+
+
 class Files(unittest.TestCase):
     """Static contracts of the deployment files; the behaviour is covered by test_linux_deploy.sh."""
 
@@ -428,7 +504,8 @@ class Files(unittest.TestCase):
         self.assertEqual(set(jobs), {'build', 'deploy', 'notify'})
         self.assertEqual(jobs['deploy']['needs'], 'build')
         self.assertEqual(jobs['notify']['needs'], ['build', 'deploy'])
-        self.assertEqual(jobs['notify']['if'], 'always() && !cancelled()')
+        self.assertEqual(jobs['notify']['if'],
+                         "always() && !cancelled() && needs.deploy.outputs.superseded != 'true'")
         for name in ('build', 'deploy'):
             self.assertIn('refs/heads/release', jobs[name]['if'])
         self.assertEqual(set(data[True]), {'push', 'workflow_dispatch'})

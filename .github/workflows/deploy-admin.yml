@@ -117,6 +117,7 @@ jobs:
       acceptance: ${{ steps.probe.outputs.acceptance }}
       tls: ${{ steps.probe.outputs.tls }}
       http8080: ${{ steps.http_probe.outcome }}
+      superseded: ${{ steps.preflight.outputs.superseded || steps.postflight.outputs.superseded }}
     steps:
       - name: Checkout exact commit (for the probe script and the entry hash)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -129,6 +130,7 @@ jobs:
           name: aiscoo-admin-linux-amd64
           path: ${{ runner.temp }}/artifact
       - name: Verify artifact digest and release HEAD before deploying
+        id: preflight
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_DIGEST: ${{ needs.build.outputs.digest }}
@@ -137,9 +139,14 @@ jobs:
           actual=$(sha256sum "$RUNNER_TEMP/artifact/aiscoo-admin" | cut -d ' ' -f1)
           [[ $EXPECTED_DIGEST =~ ^[0-9a-f]{64}$ && $actual == "$EXPECTED_DIGEST" ]] || { echo 'Artifact digest differs from the build job; refusing to deploy' >&2; exit 1; }
           latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release" --jq '.object.sha')
-          [[ $latest == "$GITHUB_SHA" ]] || { echo "release moved to a newer commit; refusing to deploy $GITHUB_SHA" >&2; exit 1; }
+          [[ $latest =~ ^[0-9a-f]{40}$ ]] || { echo 'release HEAD is missing or malformed' >&2; exit 1; }
+          if [[ $latest != "$GITHUB_SHA" ]]; then
+            printf 'superseded=true\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::release moved to $latest; skipping outdated deployment $GITHUB_SHA"
+          fi
       - name: Upload to the test host over SSH (restricted key)
         id: upload
+        if: steps.preflight.outputs.superseded != 'true'
         timeout-minutes: 25
         env:
           DEPLOY_TARGET: ${{ secrets.ADMIN_DEPLOY_TARGET }}
@@ -170,6 +177,7 @@ jobs:
           printf 'uploaded=true\n' >> "$GITHUB_OUTPUT"
       - name: Public acceptance probe
         id: probe
+        if: steps.preflight.outputs.superseded != 'true'
         env:
           # Fixed by AGENTS.md: admin HTTPS is 8443; 443 is the official website and must NOT return the admin service.
           ADMIN_ORIGIN: 'https://112.124.202.60:8443'
@@ -195,6 +203,7 @@ jobs:
           printf 'acceptance=%s\ntls=%s\n' "$mode" "$tls" >> "$GITHUB_OUTPUT"
       - name: Supplementary probe on the HTTP test entry (8080)
         id: http_probe
+        if: steps.preflight.outputs.superseded != 'true'
         # Supplementary only: 8443 is the acceptance entry. A failure here is reported in the notification
         # (the step outcome is passed on) but does not by itself fail the release; it is never silently dropped.
         continue-on-error: true
@@ -205,19 +214,25 @@ jobs:
           # Unauthenticated, no token: 8080 is plain HTTP and for test data only.
           python3 -I scripts/deploy/probe.py 'http://112.124.202.60:8080' "$GITHUB_SHA"
       - name: Re-check release HEAD after deploying
+        id: postflight
+        if: steps.preflight.outputs.superseded != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release" --jq '.object.sha')
           # No automatic rollback: the new binary may already have migrated the database.
-          [[ $latest == "$GITHUB_SHA" ]] || { echo "release moved to $latest while deploying $GITHUB_SHA; this run is superseded and not reported as a success. The newer run will deploy the new commit." >&2; exit 1; }
+          [[ $latest =~ ^[0-9a-f]{40}$ ]] || { echo 'release HEAD is missing or malformed' >&2; exit 1; }
+          if [[ $latest != "$GITHUB_SHA" ]]; then
+            printf 'superseded=true\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::release moved to $latest while deploying $GITHUB_SHA; this run is superseded"
+          fi
 
   notify:
     name: Notify Feishu
     needs: [build, deploy]
-    # A cancelled workflow (for example a pending run superseded by a newer push) sends nothing.
-    if: always() && !cancelled()
+    # Cancelled runs and deployments superseded by a newer release send no success or failure notification.
+    if: always() && !cancelled() && needs.deploy.outputs.superseded != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -245,7 +260,7 @@ jobs:
             if [[ $BUILD_RESULT != success ]]; then stage="构建/测试阶段 ($BUILD_RESULT)"
             elif [[ $UPLOADED != true ]]; then stage="部署阶段：核对或上传到服务器未完成 ($DEPLOY_RESULT)"
             elif [[ -z $ACCEPTANCE ]]; then stage="验收阶段：服务器已接收，公网验收未通过 ($DEPLOY_RESULT)"
-            else stage="验收通过之后：release HEAD 复核未通过，本次已被更新的提交顶替 ($DEPLOY_RESULT)"; fi
+            else stage="验收通过之后：release HEAD 复核失败 ($DEPLOY_RESULT)"; fi
             level="失败阶段: $stage"
             [[ $TLS_STATE != UNVERIFIED ]] || level+="。注意：TLS 链未校验"
           fi
