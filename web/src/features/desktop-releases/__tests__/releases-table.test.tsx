@@ -190,15 +190,15 @@ test('the root-only version entry follows task plugins and is hidden from other 
       <Navigation />
     </QueryClientProvider>
   )
-  expect(screen.getByText('Version Management')).toBeVisible()
+  expect(screen.getByText('Versions')).toBeVisible()
   expect(screen.getByRole('navigation').textContent).toMatch(
-    /Task PluginsVersion ManagementSystem Settings/
+    /Task PluginsVersionsSystem Settings/
   )
   act(() =>
     useAuthStore
       .getState()
       .auth.setUser({ id: 2, username: 'admin', role: ROLE.ADMIN })
   )
-  expect(screen.queryByText('Version Management')).not.toBeInTheDocument()
+  expect(screen.queryByText('Versions')).not.toBeInTheDocument()
   client.clear()
 })

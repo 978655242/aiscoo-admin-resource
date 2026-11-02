@@ -50,8 +50,11 @@ var (
 	desktopReleaseDeviceMidPattern     = regexp.MustCompile(`^[0-9A-Za-z-]{1,64}$`)
 )
 
-func desktopReleaseInvalid(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrDesktopReleaseInvalid, fmt.Sprintf(format, args...))
+// desktopReleaseInvalid refuses a request. The error is both
+// ErrDesktopReleaseInvalid and a console message: key is the English source
+// text with {{name}} placeholders, which the web console translates.
+func desktopReleaseInvalid(key string, params ...map[string]any) error {
+	return fmt.Errorf("%w: %w", ErrDesktopReleaseInvalid, common.NewMessage(key, params...))
 }
 
 // NormalizeDesktopReleasePlatform returns the canonical platform key, or ""
@@ -300,34 +303,34 @@ func desktopReleaseAllowedHosts() []string {
 func validateDesktopReleaseFile(file DesktopReleaseFileInput, allowedHosts []string) error {
 	parsed, err := url.Parse(strings.TrimSpace(file.URL))
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
-		return desktopReleaseInvalid("file url must be an https URL without credentials")
+		return desktopReleaseInvalid("File URL must be an HTTPS URL without credentials")
 	}
 	if !slices.Contains(allowedHosts, strings.ToLower(parsed.Host)) {
-		return desktopReleaseInvalid("file host %q is not in DESKTOP_RELEASE_ALLOWED_HOSTS", parsed.Host)
+		return desktopReleaseInvalid("File host {{host}} is not in DESKTOP_RELEASE_ALLOWED_HOSTS", map[string]any{"host": parsed.Host})
 	}
 	digest, err := base64.StdEncoding.DecodeString(file.Sha512)
 	if err != nil || len(digest) != 64 {
-		return desktopReleaseInvalid("sha512 must be the base64 of a 64-byte digest")
+		return desktopReleaseInvalid("SHA-512 must be the Base64 of a 64-byte digest")
 	}
 	if file.Size <= 0 {
-		return desktopReleaseInvalid("size must be positive")
+		return desktopReleaseInvalid("File size must be positive")
 	}
 	return nil
 }
 
 func validateDesktopReleaseRollout(status, percentage int, allowlist []string) error {
 	if status != DesktopReleaseStatusWithdrawn && status != DesktopReleaseStatusStable && status != DesktopReleaseStatusRollout {
-		return desktopReleaseInvalid("status must be 0, 1 or 3")
+		return desktopReleaseInvalid("Distribution status is not valid")
 	}
 	if percentage < 0 || percentage > 100 {
-		return desktopReleaseInvalid("rollout_percentage must be between 0 and 100")
+		return desktopReleaseInvalid("Rollout percentage must be between 0 and 100")
 	}
 	if len(allowlist) > maxDesktopReleaseAllowlist {
-		return desktopReleaseInvalid("device_mid_allowlist allows at most %d devices", maxDesktopReleaseAllowlist)
+		return desktopReleaseInvalid("The device allowlist allows at most {{max}} devices", map[string]any{"max": maxDesktopReleaseAllowlist})
 	}
 	for _, deviceMid := range allowlist {
 		if !desktopReleaseDeviceMidPattern.MatchString(deviceMid) {
-			return desktopReleaseInvalid("device_mid_allowlist contains an invalid device id")
+			return desktopReleaseInvalid("The device allowlist contains an invalid device ID")
 		}
 	}
 	return nil
@@ -339,7 +342,7 @@ func encodeDesktopReleaseNotes(notes map[string]string) (string, error) {
 	}
 	for locale := range notes {
 		if locale != "zh-CN" && locale != "en-US" {
-			return "", desktopReleaseInvalid("release notes locale must be zh-CN or en-US")
+			return "", desktopReleaseInvalid("Release notes support only zh-CN and en-US")
 		}
 	}
 	encoded, err := common.Marshal(notes)
@@ -347,7 +350,7 @@ func encodeDesktopReleaseNotes(notes map[string]string) (string, error) {
 		return "", err
 	}
 	if len(encoded) > maxDesktopReleaseNotesSize {
-		return "", desktopReleaseInvalid("release notes are too large")
+		return "", desktopReleaseInvalid("Release notes are too large")
 	}
 	return string(encoded), nil
 }
@@ -365,24 +368,24 @@ func encodeDesktopReleaseAllowlist(allowlist []string) (string, error) {
 func CreateDesktopRelease(input DesktopReleaseCreateInput, now int64) (*model.DesktopRelease, error) {
 	version := strings.TrimSpace(input.Version)
 	if _, ok := parseDesktopReleaseVersion(version); !ok {
-		return nil, desktopReleaseInvalid("version must be a semantic version")
+		return nil, desktopReleaseInvalid("Version must be a semantic version")
 	}
 	platform := NormalizeDesktopReleasePlatform(input.Platform)
 	if platform == "" {
-		return nil, desktopReleaseInvalid("unsupported platform")
+		return nil, desktopReleaseInvalid("Unsupported platform")
 	}
 	if input.Status != DesktopReleaseStatusWithdrawn && input.Status != DesktopReleaseStatusRollout {
-		return nil, desktopReleaseInvalid("a new release must start with status 0 or 3")
+		return nil, desktopReleaseInvalid("A new release must start unpublished or in preview rollout")
 	}
 	if err := validateDesktopReleaseRollout(input.Status, input.RolloutPercentage, input.DeviceMidAllowlist); err != nil {
 		return nil, err
 	}
 	minimumSystemVersion := strings.TrimSpace(input.MinimumSystemVersion)
 	if minimumSystemVersion != "" && !desktopReleaseSystemVersionPattern.MatchString(minimumSystemVersion) {
-		return nil, desktopReleaseInvalid("minimum_system_version must be dotted numbers")
+		return nil, desktopReleaseInvalid("Minimum system version must be dotted numbers")
 	}
 	if len(input.Files) == 0 || len(input.Files) > maxDesktopReleaseFiles {
-		return nil, desktopReleaseInvalid("a release needs between 1 and %d files", maxDesktopReleaseFiles)
+		return nil, desktopReleaseInvalid("A release needs between 1 and {{max}} files", map[string]any{"max": maxDesktopReleaseFiles})
 	}
 	allowedHosts := desktopReleaseAllowedHosts()
 	release := &model.DesktopRelease{

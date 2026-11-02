@@ -360,3 +360,70 @@ func TestDesktopReleaseAdminEndpoints(t *testing.T) {
 	assert.Equal(t, service.DesktopReleaseStatusStable, listed.Data[0].Status)
 	assert.Equal(t, map[string]string{"zh-CN": "修复若干问题", "en-US": "Bug fixes"}, listed.Data[0].ReleaseNotesByLocale)
 }
+
+// desktopReleaseErrorBody decodes the fields the web console reads from a
+// rejected admin request.
+type desktopReleaseErrorBody struct {
+	Success       bool           `json:"success"`
+	Message       string         `json:"message"`
+	MessageKey    string         `json:"message_key"`
+	MessageParams map[string]any `json:"message_params"`
+}
+
+// A rejected admin request must carry message_key, or a non-English console
+// shows the English sentence as written.
+func TestDesktopReleaseAdminErrorsAreTranslatable(t *testing.T) {
+	setupDesktopReleaseTestDB(t)
+	create := func(input service.DesktopReleaseCreateInput) (int, desktopReleaseErrorBody) {
+		body, err := common.Marshal(input)
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/releases", bytes.NewReader(body))
+		AdminCreateDesktopRelease(context)
+		var parsed desktopReleaseErrorBody
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &parsed))
+		return recorder.Code, parsed
+	}
+
+	require.Equal(t, http.StatusOK, func() int {
+		code, _ := create(desktopReleaseTestInput("3.18.0", service.DesktopReleaseStatusRollout))
+		return code
+	}())
+
+	duplicateStatus, duplicate := create(desktopReleaseTestInput("3.18.0", service.DesktopReleaseStatusRollout))
+	assert.Equal(t, http.StatusConflict, duplicateStatus)
+	assert.Equal(t, "desktop release already exists", duplicate.MessageKey)
+
+	hostInput := desktopReleaseTestInput("3.18.1", service.DesktopReleaseStatusRollout)
+	hostInput.Files[0].URL = "https://downloads.example.invalid/a.zip"
+	hostStatus, host := create(hostInput)
+	assert.Equal(t, http.StatusBadRequest, hostStatus)
+	assert.Equal(t, "File host {{host}} is not in DESKTOP_RELEASE_ALLOWED_HOSTS", host.MessageKey)
+	assert.Equal(t, "downloads.example.invalid", host.MessageParams["host"])
+	assert.Contains(t, host.Message, "downloads.example.invalid", "API callers still get the rendered English text")
+
+	limitInput := desktopReleaseTestInput("3.18.2", service.DesktopReleaseStatusRollout)
+	for range 9 {
+		limitInput.Files = append(limitInput.Files, limitInput.Files[0])
+	}
+	limitStatus, limit := create(limitInput)
+	assert.Equal(t, http.StatusBadRequest, limitStatus)
+	assert.Equal(t, "A release needs between 1 and {{max}} files", limit.MessageKey)
+	assert.EqualValues(t, 8, limit.MessageParams["max"])
+}
+
+// Every reason a request can be refused must stay an invalid-release error for
+// the controller, and also be a console message.
+func TestDesktopReleaseValidationErrorsAreConsoleMessages(t *testing.T) {
+	setupDesktopReleaseTestDB(t)
+	input := desktopReleaseTestInput("3.18.0", service.DesktopReleaseStatusRollout)
+	input.Version = "3.18"
+
+	_, err := service.CreateDesktopRelease(input, 1793491200)
+
+	require.ErrorIs(t, err, service.ErrDesktopReleaseInvalid)
+	var message *common.Message
+	require.ErrorAs(t, err, &message)
+	assert.Equal(t, "Version must be a semantic version", message.Key)
+}

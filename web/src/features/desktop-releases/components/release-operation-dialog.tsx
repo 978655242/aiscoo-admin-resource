@@ -281,7 +281,7 @@ function ReleaseConfirmation(props: ReleaseConfirmationProps) {
       handleConfirm={() => {
         if (canSubmit) void props.onSubmit(patch)
       }}
-      className='w-[calc(100%-2rem)] min-w-0 sm:max-w-xl'
+      className='w-[calc(100%-2rem)] min-w-0 data-[size=default]:sm:max-w-xl'
     >
       {props.error && (
         <Alert variant='destructive'>
