@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/table'
 
 import { CodeSamples } from './code-samples'
-import { API_DOCS } from './reference'
+import { API_CAPABILITIES, API_DOCS } from './reference'
 
 export function ApiOverview() {
   const { t } = useTranslation()
@@ -126,18 +126,73 @@ export function ApiOverview() {
         </p>
       </section>
       <section id='endpoints' className='scroll-mt-24 space-y-4'>
-        <h2 className='text-xl font-semibold'>{t('Model API endpoints')}</h2>
+        <h2 id='endpoints-title' className='text-xl font-semibold'>
+          {t('Model API endpoints')}
+        </h2>
         <p className='text-muted-foreground leading-7'>
           {t(
             'Replace YOUR_MODEL_ID with an id returned by GET /v1/models. Endpoint and parameter support depend on the selected model and its upstream provider.'
           )}
         </p>
-        <StaticDataTable>
+        <p className='text-muted-foreground leading-7'>
+          {t(
+            'Choose a capability below, then open its reference for parameters, examples, and limitations. Some capabilities share an endpoint; media tasks also require an enabled compatible plugin and channel.'
+          )}
+        </p>
+        <StaticDataTable
+          tableClassName='min-w-[40rem]'
+          tableProps={{ 'aria-label': t('Model capabilities') }}
+        >
+          <TableHeader>
+            <TableRow>
+              <TableHead scope='col'>{t('Capability')}</TableHead>
+              <TableHead scope='col'>{t('Description')}</TableHead>
+              <TableHead scope='col'>{t('API reference')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {API_CAPABILITIES.map((capability) => (
+              <TableRow key={capability.title}>
+                <TableCell className='align-top whitespace-normal'>
+                  {t(capability.title)}
+                </TableCell>
+                <TableCell className='max-w-80 align-top whitespace-normal'>
+                  {t(capability.description)}
+                </TableCell>
+                <TableCell className='align-top whitespace-normal'>
+                  <div className='flex flex-col items-start gap-2'>
+                    {capability.docs.map((id) => {
+                      const doc = API_DOCS.find((item) => item.id === id)
+                      if (!doc) return null
+
+                      return (
+                        <Link
+                          key={id}
+                          to='/docs/$page'
+                          params={{ page: id }}
+                          className='text-primary hover:underline'
+                        >
+                          {t(doc.title)}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </StaticDataTable>
+        <h3 className='text-lg font-semibold'>{t('Endpoint directory')}</h3>
+        <StaticDataTable
+          tableClassName='min-w-[48rem]'
+          tableProps={{ 'aria-labelledby': 'endpoints-title' }}
+        >
           <TableHeader>
             <TableRow>
               <TableHead>{t('API')}</TableHead>
               <TableHead>{t('Method')}</TableHead>
               <TableHead>{t('Endpoint')}</TableHead>
+              <TableHead>{t('Purpose')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -158,10 +213,20 @@ export function ApiOverview() {
                 <TableCell>
                   <code className='text-xs'>{doc.path}</code>
                 </TableCell>
+                <TableCell className='max-w-md min-w-64 leading-6 whitespace-normal'>
+                  {t(doc.summary)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </StaticDataTable>
+        <Alert>
+          <AlertDescription>
+            {t(
+              'File management, fine-tuning, image variations, and standalone token-count endpoints are not implemented.'
+            )}
+          </AlertDescription>
+        </Alert>
       </section>
       <section id='first-request' className='scroll-mt-24 space-y-4'>
         <h2 className='text-xl font-semibold'>{t('Minimal request')}</h2>

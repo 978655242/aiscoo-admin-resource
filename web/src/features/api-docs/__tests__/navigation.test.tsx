@@ -161,6 +161,8 @@ test.each([
   ['chat-completions', 'Text and multimodal', 'Chat Completions'],
   ['images', 'Media and utilities', 'Images'],
   ['errors', 'API basics', 'Errors and retries'],
+  ['tasks', 'API basics', 'Tasks and artifacts'],
+  ['responses-compact', 'Text and multimodal', 'Responses compaction'],
 ])(
   'opening %s shows its category and title in the breadcrumb',
   async (page, group, title) => {
@@ -263,6 +265,277 @@ test('overview lists compatible API addresses and copies the selected URL with i
   expect(table.parentElement).toHaveClass('overflow-x-auto')
 })
 
+test('endpoint directory shows a final purpose column with readable descriptions', async () => {
+  renderPage()
+  const table = await screen.findByRole('table', {
+    name: 'Model API endpoints',
+  })
+  expect(
+    within(table)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+  ).toEqual(['API', 'Method', 'Endpoint', 'Purpose'])
+
+  for (const [title, description] of [
+    ['Models', 'List the models available to the current API key.'],
+    [
+      'Audio',
+      'Generate speech audio from text with a compatible speech model.',
+    ],
+    ['Web search', 'Search the web through a compatible search-tools channel.'],
+  ]) {
+    const row = within(table).getByRole('row', {
+      name: new RegExp(`^${title} (GET|POST) `),
+    })
+    const cells = within(row).getAllByRole('cell')
+    expect(cells).toHaveLength(4)
+    expect(cells[3]).toHaveTextContent(description)
+    expect(cells[3]).toHaveClass('whitespace-normal')
+  }
+  expect(table).toHaveClass('min-w-[48rem]')
+  expect(table.parentElement).toHaveClass('overflow-x-auto')
+})
+
+test.each([
+  [
+    'Text generation',
+    ['chat-completions', 'responses', 'messages', 'gemini', 'completions'],
+  ],
+  ['Multimodal understanding', ['multimodal']],
+  ['Image generation and editing', ['images', 'image-edits', 'midjourney']],
+  ['Video generation and editing', ['videos']],
+  [
+    'Speech and realtime audio',
+    ['audio', 'transcriptions', 'translations', 'realtime'],
+  ],
+  ['Music and lyrics', ['music']],
+  ['Embeddings', ['embeddings']],
+  ['Rerank', ['rerank']],
+  ['Content moderation', ['moderations']],
+  ['Search and web fetching', ['search', 'fetch']],
+] as const)(
+  'overview capability %s links to reachable endpoint references',
+  async (capability, pages) => {
+    const user = userEvent.setup()
+    const router = renderPage()
+    let table = await screen.findByRole('table', { name: 'Model capabilities' })
+    expect(within(table).getAllByRole('row')).toHaveLength(11)
+    const row = within(table).getByRole('row', {
+      name: new RegExp(`^${capability} `),
+    })
+    const links = within(row).getAllByRole('link')
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(
+      pages.map((page) => `/docs/${page}`)
+    )
+
+    for (const [index, page] of pages.entries()) {
+      const title = links[index].textContent ?? ''
+      await user.click(within(table).getByRole('link', { name: title }))
+      expect(
+        await screen.findByRole('heading', { name: title, level: 1 })
+      ).toBeVisible()
+      expect(router.state.location.pathname).toBe(`/docs/${page}`)
+      expect(
+        screen.getByRole('heading', { name: 'Request example', level: 2 })
+      ).toBeVisible()
+      await user.click(
+        within(screen.getByRole('navigation', { name: 'Docs' })).getByRole(
+          'link',
+          { name: 'Docs' }
+        )
+      )
+      table = await screen.findByRole('table', { name: 'Model capabilities' })
+    }
+  }
+)
+
+test.each([
+  {
+    page: 'transcriptions',
+    title: 'Audio transcription',
+    path: '/v1/audio/transcriptions',
+    parameters: ['model', 'file', 'language', 'response_format'],
+    formFields: ['-F "model=YOUR_MODEL_ID"', '-F "file=@audio.mp3"'],
+    payload: undefined,
+  },
+  {
+    page: 'translations',
+    title: 'Audio translation',
+    path: '/v1/audio/translations',
+    parameters: ['model', 'file', 'response_format'],
+    formFields: ['-F "model=YOUR_MODEL_ID"', '-F "file=@speech.mp3"'],
+    payload: undefined,
+  },
+  {
+    page: 'music',
+    title: 'Music and lyrics',
+    path: '/suno/submit/music',
+    parameters: ['action', 'gpt_description_prompt', 'prompt'],
+    formFields: [],
+    payload: {
+      gpt_description_prompt: 'An upbeat acoustic song about spring',
+    },
+  },
+  {
+    page: 'search',
+    title: 'Web search',
+    path: '/v1/tools/search',
+    parameters: ['query'],
+    formFields: [],
+    payload: { query: 'DeepSeek API documentation' },
+  },
+])(
+  'opening $page from the endpoint directory exposes its parameters and usable request payload',
+  async (entry) => {
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText')
+    const router = renderPage()
+    const directory = await screen.findByRole('table', {
+      name: 'Model API endpoints',
+    })
+    const link = within(directory).getByRole('link', { name: entry.title })
+    expect(link).toHaveAttribute('href', `/docs/${entry.page}`)
+    await user.click(link)
+    expect(
+      await screen.findByRole('heading', { name: entry.title, level: 1 })
+    ).toBeVisible()
+    expect(router.state.location.pathname).toBe(`/docs/${entry.page}`)
+    const parameters = screen.getByRole('table')
+    for (const parameter of entry.parameters) {
+      expect(
+        within(parameters).getByText(parameter, {
+          selector: 'code',
+          exact: true,
+        })
+      ).toBeVisible()
+    }
+    const request = screen.getAllByRole('tabpanel')[0]
+    await user.click(within(request).getByRole('button', { name: 'Copy code' }))
+    await waitFor(() =>
+      expect(copy).toHaveBeenLastCalledWith(
+        expect.stringContaining(`curl "${window.location.origin}${entry.path}"`)
+      )
+    )
+    const code = copy.mock.lastCall?.[0] ?? ''
+    for (const field of entry.formFields) {
+      expect(code).toContain(field)
+    }
+    if (entry.payload) {
+      const payload = code.match(/--json\s+'([^']+)'/)?.[1]
+      expect(payload).toBeDefined()
+      expect(JSON.parse(payload ?? '')).toEqual(entry.payload)
+    }
+  }
+)
+
+test('multimodal scenario tabs wrap and keep same-language examples distinct through keyboard selection and copying', async () => {
+  const user = userEvent.setup()
+  const copy = vi.spyOn(navigator.clipboard, 'writeText')
+  renderPage('/docs/multimodal')
+  const tabs = await screen.findByRole('tablist', { name: 'Example language' })
+  expect(tabs).toHaveClass('flex-wrap', 'h-auto', 'max-w-full')
+  expect(
+    within(tabs)
+      .getAllByRole('tab')
+      .map((tab) => tab.textContent)
+  ).toEqual(['Image input', 'Audio input', 'Video input'])
+  const image = within(tabs).getByRole('tab', { name: 'Image input' })
+  const audio = within(tabs).getByRole('tab', { name: 'Audio input' })
+  const video = within(tabs).getByRole('tab', { name: 'Video input' })
+  expect(image).toHaveAttribute('aria-selected', 'true')
+  expect(video).toHaveAttribute('aria-selected', 'false')
+  const imagePanel = screen.getByRole('tabpanel', { name: 'Image input' })
+  expect(
+    within(imagePanel).getByText('Image input', { exact: true })
+  ).toBeVisible()
+  await user.click(
+    within(imagePanel).getByRole('button', { name: 'Copy code' })
+  )
+  await waitFor(() =>
+    expect(copy).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        `curl "${window.location.origin}/v1/chat/completions"`
+      )
+    )
+  )
+  const imageCode = copy.mock.lastCall?.[0]
+  expect(imageCode).toMatch(/"type"\s*:\s*"image_url"/)
+
+  image.focus()
+  await user.keyboard('{ArrowRight}{Enter}')
+  expect(audio).toHaveFocus()
+  expect(audio).toHaveAttribute('aria-selected', 'true')
+  expect(
+    screen.getByRole('tabpanel', { name: 'Audio input' })
+  ).toHaveTextContent('input_audio')
+  await user.keyboard('{ArrowRight}{Enter}')
+  expect(video).toHaveFocus()
+  expect(video).toHaveAttribute('aria-selected', 'true')
+  expect(image).toHaveAttribute('aria-selected', 'false')
+  expect(
+    screen.queryByRole('tabpanel', { name: 'Image input' })
+  ).not.toBeInTheDocument()
+  const videoPanel = screen.getByRole('tabpanel', { name: 'Video input' })
+  expect(
+    within(videoPanel).getByText('Video input', { exact: true })
+  ).toBeVisible()
+  await user.click(
+    within(videoPanel).getByRole('button', { name: 'Copy code' })
+  )
+  await waitFor(() =>
+    expect(copy).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        `curl "${window.location.origin}/v1beta/models/YOUR_MODEL_ID:generateContent"`
+      )
+    )
+  )
+  const videoCode = copy.mock.lastCall?.[0]
+  expect(window.location.port).not.toBe('')
+  expect(videoCode).toContain('x-goog-api-key: $API_KEY')
+  expect(videoCode).toContain('fileData')
+  expect(videoCode).not.toContain('image_url')
+  expect(videoCode).not.toContain('https://configured.example:8443')
+  expect(videoCode).not.toEqual(imageCode)
+
+  video.focus()
+  await user.keyboard('{ArrowLeft}{ArrowLeft}{Enter}')
+  expect(image).toHaveFocus()
+  expect(image).toHaveAttribute('aria-selected', 'true')
+  expect(
+    screen.getByRole('tabpanel', { name: 'Image input' })
+  ).toHaveTextContent(`${window.location.origin}/v1/chat/completions`)
+})
+
+test('video workflow tabs copy the selected bash operation with the current origin and port', async () => {
+  const user = userEvent.setup()
+  const copy = vi.spyOn(navigator.clipboard, 'writeText')
+  renderPage('/docs/videos')
+  const curl = await screen.findByRole('tab', { name: 'cURL' })
+  expect(curl).toHaveAttribute('aria-selected', 'true')
+  for (const [label, path, payload] of [
+    ['cURL', '/v1/videos', '"prompt"'],
+    ['Poll task', '/v1/videos/YOUR_TASK_ID', 'Authorization: Bearer $API_KEY'],
+    [
+      'Download result',
+      '/v1/videos/YOUR_TASK_ID/content',
+      '--output video.mp4',
+    ],
+    ['Image to video', '/v1/videos', '-F "input_reference=@reference.png"'],
+  ]) {
+    const tab = screen.getByRole('tab', { name: label })
+    await user.click(tab)
+    expect(tab).toHaveAttribute('aria-selected', 'true')
+    const panel = screen.getByRole('tabpanel', { name: label })
+    await user.click(within(panel).getByRole('button', { name: 'Copy code' }))
+    await waitFor(() =>
+      expect(copy).toHaveBeenLastCalledWith(
+        expect.stringContaining(`curl "${window.location.origin}${path}"`)
+      )
+    )
+    expect(copy.mock.lastCall?.[0]).toContain(payload)
+  }
+})
+
 test('example tabs switch language by keyboard and copy code using the current origin and port', async () => {
   const user = userEvent.setup()
   const copy = vi.fn().mockResolvedValue(undefined)
@@ -309,5 +582,61 @@ test('switching the interface language updates the document heading and API addr
   ).toBeVisible()
   expect(
     within(table).getByRole('cell', { name: 'Anthropic 兼容 API' })
+  ).toBeVisible()
+  const endpoints = screen.getByRole('table', { name: '模型 API 接口' })
+  expect(
+    within(endpoints).getByRole('columnheader', { name: '用途' })
+  ).toBeVisible()
+  expect(
+    within(endpoints).getByRole('cell', {
+      name: '列出当前 API 密钥可用的模型。',
+    })
+  ).toBeVisible()
+})
+
+test('switching to Chinese translates new document headings, scenario tabs, code titles, and capability links', async () => {
+  const user = userEvent.setup()
+  renderPage('/docs/multimodal')
+  expect(
+    await screen.findByRole('heading', { name: 'Multimodal inputs', level: 1 })
+  ).toBeVisible()
+  i18next.addResourceBundle('zhCN', 'translation', zh.translation, true, true)
+  await act(() => i18next.changeLanguage('zhCN'))
+  expect(
+    screen.getByRole('heading', { name: '多模态输入', level: 1 })
+  ).toBeVisible()
+  expect(screen.getByRole('tab', { name: '图片输入' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  await user.click(screen.getByRole('tab', { name: '视频输入' }))
+  expect(
+    within(screen.getByRole('tabpanel', { name: '视频输入' })).getByText(
+      '视频输入',
+      {
+        exact: true,
+      }
+    )
+  ).toBeVisible()
+  await user.click(
+    within(
+      screen.getByRole('navigation', { name: i18next.t('Docs') })
+    ).getByRole('link', { name: i18next.t('Docs') })
+  )
+  const table = await screen.findByRole('table', {
+    name: i18next.t('Model capabilities'),
+  })
+  expect(
+    within(table).getByRole('link', { name: '多模态输入' })
+  ).toHaveAttribute('href', '/docs/multimodal')
+  const music = within(table).getByRole('link', { name: '音乐与歌词' })
+  expect(music).toHaveAttribute('href', '/docs/music')
+  await user.click(music)
+  expect(
+    await screen.findByRole('heading', { name: '音乐与歌词', level: 1 })
+  ).toBeVisible()
+  await act(() => i18next.changeLanguage('en'))
+  expect(
+    screen.getByRole('heading', { name: 'Music and lyrics', level: 1 })
   ).toBeVisible()
 })

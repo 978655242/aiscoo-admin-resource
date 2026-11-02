@@ -22,8 +22,10 @@ import { CodeBlock } from '@/components/ai-elements/code-block'
 import { CopyButton } from '@/components/copy-button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+import type { ApiCodeSample } from './reference'
+
 interface CodeSamplesProps {
-  samples: { language: string; code: string }[]
+  samples: ApiCodeSample[]
 }
 
 export function CodeSamples(props: CodeSamplesProps) {
@@ -31,27 +33,43 @@ export function CodeSamples(props: CodeSamplesProps) {
   const origin = window.location.origin
 
   return (
-    <Tabs defaultValue={props.samples[0]?.language}>
+    <Tabs defaultValue={props.samples[0]?.label ?? props.samples[0]?.language}>
       {props.samples.length > 1 && (
-        <TabsList aria-label={t('Example language')}>
-          {props.samples.map((sample) => (
-            <TabsTrigger key={sample.language} value={sample.language}>
-              {sample.language === 'bash' ? 'cURL' : sample.language}
-            </TabsTrigger>
-          ))}
+        <TabsList
+          aria-label={t('Example language')}
+          className='h-auto max-w-full flex-wrap justify-start'
+        >
+          {props.samples.map((sample) => {
+            let label = sample.language === 'bash' ? 'cURL' : sample.language
+            if (sample.label) label = t(sample.label)
+
+            return (
+              <TabsTrigger
+                key={sample.label ?? sample.language}
+                value={sample.label ?? sample.language}
+              >
+                {label}
+              </TabsTrigger>
+            )
+          })}
         </TabsList>
       )}
       {props.samples.map((sample) => {
         const code = sample.code
           .replaceAll('__OPENAI_BASE__', `${origin}/v1`)
           .replaceAll('__API_ORIGIN__', origin)
+        let title = sample.language === 'bash' ? 'cURL' : sample.language
+        if (sample.label) title = t(sample.label)
 
         return (
-          <TabsContent key={sample.language} value={sample.language}>
+          <TabsContent
+            key={sample.label ?? sample.language}
+            value={sample.label ?? sample.language}
+          >
             <CodeBlock
               code={code}
               language={sample.language}
-              title={sample.language === 'bash' ? 'cURL' : sample.language}
+              title={title}
               showToolbar
               enableCollapse={false}
             >
