@@ -142,7 +142,7 @@ export function Security() {
         {t('Security & Access')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='mx-auto w-full max-w-7xl'>{content}</div>
+        <div className='w-full'>{content}</div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

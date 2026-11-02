@@ -262,6 +262,17 @@ describe('wallet balance actions', () => {
 })
 
 describe('wallet subscription catalog', () => {
+  it('fills the shared page width without an extra centered width cap', async () => {
+    renderWallet()
+    const balance = await screen.findByRole('region', {
+      name: 'Current Balance',
+    })
+    const content = balance.parentElement
+    expect(content).toHaveClass('w-full')
+    expect(content?.className).not.toMatch(/\bmax-w-/)
+    expect(content).not.toHaveClass('mx-auto')
+  })
+
   it('lays out four plans in responsive columns and aligns their action rows', async () => {
     renderWallet()
     const plan = await screen.findByRole('article', { name: 'Lite' })
