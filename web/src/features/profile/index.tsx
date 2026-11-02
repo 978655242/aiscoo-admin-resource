@@ -45,7 +45,7 @@ export function Profile() {
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Profile')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='@container/profile mx-auto flex w-full max-w-5xl flex-col gap-4'>
+        <div className='@container/profile flex w-full flex-col gap-4'>
           <ProfileHeader profile={profile} loading={loading} />
 
           <div className='grid min-w-0 grid-cols-1 items-start gap-4 @min-[52rem]/profile:grid-cols-[minmax(0,1fr)_18rem]'>

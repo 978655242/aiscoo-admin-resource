@@ -91,6 +91,15 @@ function renderProfile() {
 }
 
 describe('compact profile layout', () => {
+  it('fills the shared page width without an extra centered width cap', async () => {
+    renderProfile()
+    const summary = await screen.findByRole('region', { name: 'Profile' })
+    const content = summary.parentElement
+    expect(content).toHaveClass('w-full')
+    expect(content?.className).not.toMatch(/\bmax-w-/)
+    expect(content).not.toHaveClass('mx-auto')
+  })
+
   it('keeps the account summary first and language preferences in a responsive side column', async () => {
     renderProfile()
     const summary = await screen.findByRole('region', { name: 'Profile' })
