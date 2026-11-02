@@ -75,9 +75,23 @@ export function BotProtectionSection({
       ([key, value]) =>
         value !== defaultValues[key as keyof BotProtectionFormValues]
     )
+    const turnstileEnableUpdate = updates.find(
+      ([key, value]) => key === 'TurnstileCheckEnabled' && value === true
+    )
+    const orderedUpdates = turnstileEnableUpdate
+      ? [
+          ...updates.filter(([key]) => key !== 'TurnstileCheckEnabled'),
+          turnstileEnableUpdate,
+        ]
+      : updates
 
-    for (const [key, value] of updates) {
-      await updateOption.mutateAsync({ key, value: value ?? '' })
+    try {
+      for (const [key, value] of orderedUpdates) {
+        await updateOption.mutateAsync({ key, value: value ?? '' })
+      }
+    } catch {
+      // The mutation reports the failure once. Keep the draft for retry and
+      // never enable Turnstile after a key failed to save.
     }
   }
 
