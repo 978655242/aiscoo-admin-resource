@@ -119,6 +119,66 @@ func productionRelayRequest(engine *gin.Engine, path, key, body string, noDispat
 	return response
 }
 
+func TestManagedResponsesPluginWithoutHostValidatedLimitFailsClosed(t *testing.T) {
+	var events []service.PolicyEvent
+	engine, subscription := setupZenProductionRouter(t, func(c *gin.Context) {
+		c.Next()
+		events = service.RequestPolicy(c).Events()
+	})
+	service.InitHttpClient()
+	previousPrices := ratio_setting.ModelPrice2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"untrusted-limit-model":0}`))
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousPrices)) })
+	const source = `
+export const meta = {apiVersion:1,key:"untrusted-limit",name:"Untrusted limit",version:"1.0.0",author:{name:"Test"},models:["untrusted-limit-model"],fetchMode:"per_task",protocols:[{name:"openai_responses",supports:["sync"]}]};
+export function buildSubmitRequest(ctx) { return {url:ctx.baseUrl+"/submit",method:"POST",body:{prompt:ctx.requestBody.input,seconds:5}}; }
+export function parseSubmitResponse(ctx, response) { return {taskId:"fixture-task",taskData:response.body,immediate:{status:"SUCCESS"}}; }
+export function buildQueryRequest(ctx) { return {url:ctx.baseUrl+"/query"}; }
+export function parseTaskResult() { return {status:"SUCCESS"}; }
+export function listArtifacts() { return []; }
+export function buildContentRequest() { throw new Error("artifact_not_found"); }
+export const protocols = {openai_responses:{decodeRequest:function(ctx){return {kind:"submit",model:ctx.model,requestBody:ctx.body.value};},renderFinal:function(){return {output:[]};}}};
+`
+	_, err := pluginruntime.DefaultRegistry.Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, pluginruntime.DefaultRegistry.Unregister("untrusted-limit")) })
+	var submissions atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			submissions.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"result":"fixture completed"}`)
+	}))
+	t.Cleanup(upstream.Close)
+	channel := model.Channel{Name: "untrusted-limit", Type: constant.ChannelTypeTaskPlugin, Key: "synthetic-upstream", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled, AutoBan: common.GetPointer(1), Group: "default", Models: "untrusted-limit-model", Setting: common.GetPointer(`{"task_plugin_key":"untrusted-limit"}`)}
+	require.NoError(t, model.DB.Create(&channel).Error)
+	require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: channel.Models, ChannelId: channel.Id, Enabled: true}).Error)
+	require.NoError(t, model.DB.Create(&model.Model{ModelName: channel.Models, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig("openai-responses"))}).Error)
+	publishProductionZenConfig(t, channel.Models, "openai-responses", productionZenConfig("openai-responses"))
+	body := `{"model":"untrusted-limit-model","input":"fixture","max_output_tokens":128}`
+	response := productionRelayRequest(engine, "/v1/responses", "productionmanagedkey", body, false)
+	assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	assert.Zero(t, submissions.Load(), "托管插件不能提交宿主无法验证限额的生成请求")
+	var localFailure, stopped bool
+	for _, event := range events {
+		localFailure = localFailure || event.ErrorSource == "local" && event.Decision.Reason == "local_rejection"
+		stopped = stopped || event.Decision.Action == "stop" && event.Health == "unchanged" && event.Decision.Reason != "task_accepted"
+	}
+	assert.True(t, localFailure, "插件拒绝应记录为本地策略拒绝")
+	assert.True(t, stopped, "本地拒绝不得标为已接受任务或修改渠道健康")
+	var after model.UserSubscription
+	require.NoError(t, model.DB.First(&after, subscription.Id).Error)
+	assert.Equal(t, subscription.AmountUsed, after.AmountUsed)
+	var persisted model.Channel
+	require.NoError(t, model.DB.First(&persisted, channel.Id).Error)
+	assert.Equal(t, common.ChannelStatusEnabled, persisted.Status)
+
+	response = productionRelayRequest(engine, "/v1/responses", "productionnativekey", body, false)
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Equal(t, int32(1), submissions.Load(), "非托管插件请求维持原有行为")
+}
+
 func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *testing.T) {
 	engine, sub := setupZenProductionRouter(t)
 	for _, protocol := range []struct{ path, apiType, field string }{
@@ -234,7 +294,7 @@ export const protocols = {openai_responses: {
 		{"excessive output bound", productionZenConfig("openai-responses"), `,"max_output_tokens":129`, "productionmanagedkey", 400, "invalid_request", false},
 		{"native safety bound", productionZenConfig("openai-responses"), `,"max_output_tokens":1073741824`, "productionmanagedkey", 400, "invalid_request", false},
 		{"valid declared managed model", productionZenConfig("openai-responses"), `,"max_output_tokens":128`, "productionmanagedkey", 400, "", true},
-		{"explicit zero retained", productionZenConfig("openai-responses"), `,"max_output_tokens":0`, "productionmanagedkey", 400, "", true},
+		{"explicit zero rejected", productionZenConfig("openai-responses"), `,"max_output_tokens":0`, "productionmanagedkey", 400, "invalid_request", false},
 		{"native without metadata or output bound", "", "", "productionnativekey", 400, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -335,14 +395,14 @@ export const protocols = {openai_responses: {
 		}
 		before := submissions.Load()
 		response := productionRelayRequest(engine, "/v1/responses", "productionmanagedkey", `{"model":"claimed-admission-model","input":"hello","max_output_tokens":1}`, false)
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		assert.Equal(t, before+1, submissions.Load())
+		require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+		assert.Equal(t, before, submissions.Load(), "托管插件优先时不提交不可验证的生成请求")
 		assert.Zero(t, ordinaryCalls.Load())
 
 		response = productionRelayRequest(engine, "/v1/responses", "productionnativekey", `{"model":"claimed-admission-model","input":"hello","background":true}`, false)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		assert.Equal(t, int32(1), ordinaryCalls.Load())
-		assert.Equal(t, before+1, submissions.Load())
+		assert.Equal(t, before, submissions.Load())
 		// Keep the original fixture's later task and reservation assertions independent.
 		require.NoError(t, model.DB.Where("user_id = ?", sub.UserId).Delete(&model.Task{}).Error)
 		require.NoError(t, model.DB.Where("user_id = ?", sub.UserId).Delete(&model.SubscriptionPreConsumeRecord{}).Error)
@@ -358,6 +418,11 @@ export const protocols = {openai_responses: {
 			publishProductionZenConfig(t, metadata.ModelName, "openai-responses", raw)
 			before := submissions.Load()
 			response := productionRelayRequest(engine, "/v1/responses", key, `{"model":"claimed-admission-model","input":"hello"`+limit+`}`, false)
+			if managed {
+				require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+				assert.Equal(t, before, submissions.Load())
+				return
+			}
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			assert.Equal(t, before+1, submissions.Load())
 			var payload map[string]any
@@ -368,29 +433,20 @@ export const protocols = {openai_responses: {
 			require.NoError(t, model.DB.Order("id DESC").First(&persisted).Error)
 			assert.Equal(t, constant.TaskPlatform("production-admission"), persisted.Platform)
 			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), persisted.Status)
-			if managed {
-				var reservation model.SubscriptionPreConsumeRecord
-				require.NoError(t, model.DB.Where("user_id = ? AND funding_scope = ?", sub.UserId, model.SubscriptionUsageScopeZen).First(&reservation).Error)
-				assert.Equal(t, sub.Id, reservation.UserSubscriptionId)
-				assert.Equal(t, "settled", reservation.Status)
-				assert.Zero(t, reservation.FinalQuota)
-				require.NoError(t, model.DB.First(&sub, sub.Id).Error)
-				assert.Equal(t, int64(7), sub.AmountUsed, "a free managed task still completes its designated funding fact without charge")
-			}
 		})
 	}
-	t.Run("paid retry is reserved before another upstream submission", func(t *testing.T) {
+	t.Run("ordinary paid retry is reserved before another upstream submission", func(t *testing.T) {
 		previousRetries := common.RetryTimes
 		common.RetryTimes = 1
 		t.Cleanup(func() { common.RetryTimes = previousRetries })
-		publishProductionZenConfig(t, metadata.ModelName, "openai-responses", productionZenConfig("openai-responses"))
-		response := productionRelayRequest(engine, "/v1/responses", "productionmanagedkey", `{"model":"claimed-admission-model","input":"paid-retry","max_output_tokens":1}`, false)
-		assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
-		assert.Contains(t, response.Body.String(), "XCODE_QUOTA_EXHAUSTED")
+		require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", sub.UserId).Update("quota", 1).Error)
+		response := productionRelayRequest(engine, "/v1/responses", "productionnativekey", `{"model":"claimed-admission-model","input":"paid-retry"}`, false)
+		assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), `"code":"permission_denied"`)
 		assert.Equal(t, int32(1), repricedSubmissions.Load(), "insufficient paid retry must never be submitted upstream")
 		var tasks int64
 		require.NoError(t, model.DB.Model(&model.Task{}).Count(&tasks).Error)
-		assert.EqualValues(t, 2, tasks, "only the two preceding completed tasks are persisted")
+		assert.EqualValues(t, 1, tasks, "only the preceding ordinary completed task is persisted")
 	})
 }
 
@@ -509,6 +565,10 @@ export const protocols = {openai_responses: {
 							assert.Equal(t, beforeOrdinary, ordinaryCalls.Load())
 							assert.Equal(t, beforePlugin, pluginCalls.Load())
 							assert.NotContains(t, response.Body.String(), tc.key)
+						} else if tc.key == "productionmanagedkey" {
+							require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+							assert.Equal(t, beforeOrdinary, ordinaryCalls.Load())
+							assert.Equal(t, beforePlugin, pluginCalls.Load(), "托管插件在提交前被本地拒绝")
 						} else {
 							require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 							if tc.wantPlugin {
@@ -572,9 +632,19 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = previousFreePreConsume
 		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousRatios))
 	})
-	var calls atomic.Int32
+	var calls, newGroupCalls atomic.Int32
 	var expectLimit atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer live-upstream-secret" {
+			w.Header().Set("Content-Type", "application/json")
+			if newGroupCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, `{"error":{"message":"retry fixture","type":"api_error","code":"provider_busy"}}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"chat_live_group","object":"chat.completion","created":1,"model":"admission-reuse-chat","choices":[{"index":0,"message":{"role":"assistant","content":"live group"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`)
+			return
+		}
 		calls.Add(1)
 		var actual model.UserSubscription
 		if assert.NoError(t, model.DB.First(&actual, sub.Id).Error) {
@@ -593,17 +663,17 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v1/responses" {
 			_, present := payload["max_output_tokens"]
-			assert.Equal(t, expectLimit.Load(), present, "explicit zero and native omission retain their distinct forwarding semantics")
+			assert.Equal(t, expectLimit.Load(), present, "managed explicit limit and ordinary omission retain their distinct forwarding semantics")
 			if limit, present := payload["max_output_tokens"]; present {
-				assert.Equal(t, float64(0), limit)
+				assert.Equal(t, float64(1), limit)
 			}
 			assert.Equal(t, false, payload["store"])
 			_, _ = io.WriteString(w, `{"id":"resp_fixture","object":"response","status":"completed","model":"admission-reuse-responses","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}`)
 		} else {
 			_, present := payload["max_tokens"]
-			assert.Equal(t, expectLimit.Load(), present, "explicit zero and native omission retain their distinct forwarding semantics")
+			assert.Equal(t, expectLimit.Load(), present, "managed explicit limit and ordinary omission retain their distinct forwarding semantics")
 			if limit, present := payload["max_tokens"]; present {
-				assert.Equal(t, float64(0), limit)
+				assert.Equal(t, float64(1), limit)
 			}
 			_, _ = io.WriteString(w, `{"id":"chat_fixture","object":"chat.completion","created":1,"model":"admission-reuse-chat","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`)
 		}
@@ -622,7 +692,7 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 			t.Run(fmt.Sprintf("%s/managed=%t", protocol.apiType, managed), func(t *testing.T) {
 				key, limit := "productionnativekey", ""
 				if managed {
-					key, limit = "productionmanagedkey", fmt.Sprintf(`,%q:0`, protocol.field)
+					key, limit = "productionmanagedkey", fmt.Sprintf(`,%q:1`, protocol.field)
 				}
 				body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}],"input":"hello","store":false%s}`, protocol.name, limit)
 				expectLimit.Store(managed)
@@ -651,21 +721,10 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		cached, err = model.GetUserCache(user.Id)
 		require.NoError(t, err)
 		require.Equal(t, "default", cached.Group, "the fixture must retain a genuinely warm stale authentication cache")
-		var newGroupCalls atomic.Int32
-		newUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if newGroupCalls.Add(1) == 1 {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = io.WriteString(w, `{"error":{"message":"retry fixture","type":"api_error","code":"provider_busy"}}`)
-				return
-			}
-			_, _ = io.WriteString(w, `{"id":"chat_live_group","object":"chat.completion","created":1,"model":"admission-reuse-chat","choices":[{"index":0,"message":{"role":"assistant","content":"live group"},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`)
-		}))
-		t.Cleanup(newUpstream.Close)
-		channel := model.Channel{Name: "live-group-channel", Type: constant.ChannelTypeOpenAI, Key: "upstream-secret", BaseURL: &newUpstream.URL, Status: common.ChannelStatusEnabled, Group: "admission-live", Models: "admission-reuse-chat"}
+		channel := model.Channel{Name: "live-group-channel", Type: constant.ChannelTypeOpenAI, Key: "live-upstream-secret", BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled, Group: "admission-live", Models: "admission-reuse-chat"}
 		require.NoError(t, model.DB.Create(&channel).Error)
 		require.NoError(t, model.DB.Create(&model.Ability{Group: "admission-live", Model: "admission-reuse-chat", ChannelId: channel.Id, Enabled: true}).Error)
-		body := `{"model":"admission-reuse-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":0}`
+		body := `{"model":"admission-reuse-chat","messages":[{"role":"user","content":"hello"}],"max_tokens":1}`
 		expectLimit.Store(true)
 		oldGroupCalls := calls.Load()
 		response := productionRelayRequest(engine, "/v1/chat/completions", "productionmanagedkey", body, false)

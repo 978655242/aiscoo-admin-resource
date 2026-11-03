@@ -73,31 +73,52 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 		return request, err
 	}
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
-	var validatedGroup string
+	// XCODE: 一次准入同时得到用户组与输出上限快照，供后续渠道尝试沿用（zen-integration.md §6.5）。
+	var admission service.ZenModelAdmission
 	var modelID string
 	switch typed := request.(type) {
 	case *dto.GeneralOpenAIRequest:
 		modelID = typed.Model
 		if relayMode == relayconstant.RelayModeChatCompletions {
-			validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeOpenAIChatCompletions, typed.MaxTokens, typed.MaxCompletionTokens)
+			// XCODE: 改用同一次解析即返回用户组与输出上限的准入接口，Chat 的 max_tokens 与 max_completion_tokens 一并受限（zen-integration.md §6.5）。
+			admission, err = service.ValidateZenModelRequestWithLimit(userID, typed.Model, zenDTO.ZenAPITypeOpenAIChatCompletions, typed.MaxTokens, typed.MaxCompletionTokens)
 		} else {
 			err = types.NewErrorWithStatusCode(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	case *dto.ClaudeRequest:
 		modelID = typed.Model
-		validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeAnthropicMessages, typed.MaxTokens, typed.MaxTokensToSample)
+		// XCODE: 同上，Anthropic 的 max_tokens 为必填，旧字段 max_tokens_to_sample 仅作附加约束（zen-integration.md §6.5）。
+		admission, err = service.ValidateZenModelRequestWithLimit(userID, typed.Model, zenDTO.ZenAPITypeAnthropicMessages, typed.MaxTokens, typed.MaxTokensToSample)
 	case *dto.OpenAIResponsesRequest:
 		modelID = typed.Model
-		validatedGroup, err = service.ValidateZenModelRequest(userID, typed.Model, zenDTO.ZenAPITypeOpenAIResponses, typed.MaxOutputTokens)
+		// XCODE: 同上，Responses 的 max_output_tokens 同样取自同一次准入解析（zen-integration.md §6.5）。
+		admission, err = service.ValidateZenModelRequestWithLimit(userID, typed.Model, zenDTO.ZenAPITypeOpenAIResponses, typed.MaxOutputTokens)
 	default:
 		err = types.NewErrorWithStatusCode(service.ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if err == nil {
-		common.SetContextKey(c, constant.ContextKeyUserGroup, validatedGroup)
-		common.SetContextKey(c, constant.ContextKeyUsingGroup, validatedGroup)
-		common.SetContextKey(c, constant.ContextKeyTokenGroup, validatedGroup)
+		// XCODE: 入站 DTO 解析会折叠重复键；先检查原始正文，避免超限值被后一个同名键隐藏（zen-integration.md §6.5）。
+		storage, storageErr := common.GetBodyStorage(c)
+		if storageErr != nil {
+			return nil, service.ZenOutputLimitError()
+		}
+		reader, readerErr := storage.NewReader()
+		if readerErr != nil {
+			return nil, service.ZenOutputLimitError()
+		}
+		bodyErr := service.ValidateZenOutputBody(reader, admission.APIType, ZenSafeOutputLimit(admission.MaxOutputTokens), true)
+		_ = reader.Close()
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		// XCODE: 用户组改取自准入快照，行为与原先的 validatedGroup 一致（zen-integration.md §6.5）。
+		common.SetContextKey(c, constant.ContextKeyUserGroup, admission.Group)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, admission.Group)
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, admission.Group)
 		common.SetContextKey(c, constant.ContextKeyZenValidatedRequest, request)
-		service.GetChannelConstraints(c).AddFilter(zenDTO.ChannelFilter{Kind: zenDTO.FilterZenAuthority, Group: validatedGroup, Model: modelID, RequestPath: c.Request.URL.Path})
+		// XCODE: 把准入快照写入上下文，最终发送前据此复核输出上限（zen-integration.md §6.5）。
+		common.SetContextKey(c, constant.ContextKeyZenModelAdmission, admission)
+		service.GetChannelConstraints(c).AddFilter(zenDTO.ChannelFilter{Kind: zenDTO.FilterZenAuthority, Group: admission.Group, Model: modelID, RequestPath: c.Request.URL.Path})
 	}
 	return request, err
 }
@@ -165,6 +186,11 @@ func GetAndValidateEmbeddingRequest(c *gin.Context, relayMode int) (*dto.Embeddi
 // pre-consume quota math (preConsumedTokens * ratio); an unbounded value can
 // overflow the conversion and corrupt billing.
 const maxTokensLimit = math.MaxInt32 / 2
+
+// XCODE: 托管输出上限取模型上限与既有计费安全边界 maxTokensLimit 的较小值，不另设数值上限（zen-integration.md §6.5）。
+func ZenSafeOutputLimit(modelLimit uint64) uint64 {
+	return min(modelLimit, uint64(maxTokensLimit))
+}
 
 // ExceedsMaxTokensLimit checks token limits before they reach billing arithmetic.
 func ExceedsMaxTokensLimit(values ...*uint) bool {

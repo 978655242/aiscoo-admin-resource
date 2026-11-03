@@ -534,7 +534,7 @@ func TestZenManagedRequestValidation(t *testing.T) {
 			code                  string
 		}{
 			{"at metadata maximum", protocol.modelID, fmt.Sprintf(`,%q:128`, protocol.field), 0, ""},
-			{"explicit zero", protocol.modelID, fmt.Sprintf(`,%q:0`, protocol.field), 0, ""},
+			{"explicit zero", protocol.modelID, fmt.Sprintf(`,%q:0`, protocol.field), 400, "invalid_request"},
 			{"absent output bound", protocol.modelID, "", 400, "invalid_request"},
 			{"above metadata maximum", protocol.modelID, fmt.Sprintf(`,%q:129`, protocol.field), 400, "invalid_request"},
 			{"native safety maximum", protocol.modelID, fmt.Sprintf(`,%q:%d`, protocol.field, uint64(math.MaxInt32)), 400, ""},
@@ -560,11 +560,6 @@ func TestZenManagedRequestValidation(t *testing.T) {
 				if tc.status == 0 {
 					require.NoError(t, err)
 					require.NotNil(t, request)
-					if tc.name == "explicit zero" {
-						encoded, marshalErr := common.Marshal(request)
-						require.NoError(t, marshalErr)
-						assert.Contains(t, string(encoded), fmt.Sprintf(`%q:0`, protocol.field))
-					}
 					return
 				}
 				require.Error(t, err)

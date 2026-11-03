@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	common2 "github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -340,6 +342,31 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	// 这样可以覆盖默认的 Authorization header 设置
 	if err = ApplyHeaderOverride(info, c, req); err != nil {
 		return nil, err
+	}
+	if info.ClientPurpose == model.ClientPurposeZen {
+		// XCODE: 渠道参数覆盖与协议转换均已完成；仅复核最终请求体中的输出上限参数，
+		// 不证明上游服务一定执行该字段（见 docs/specs/zen-integration.md §6.5）。
+		// 使用独立读取器，透传字节与 GetBody 重放均不受影响。
+		admission, ok := common2.GetContextKeyType[service.ZenModelAdmission](c, appconstant.ContextKeyZenModelAdmission)
+		mediaType, _, mediaErr := mime.ParseMediaType(req.Header.Get("Content-Type"))
+		encoding := req.Header.Get("Content-Encoding")
+		body, replayable := requestBody.(common2.ReplayableBody)
+		if !ok || admission.ModelID != info.OriginModelName || !service.ZenRelayFormatAllowed(info.ChannelType, info.RelayFormat) ||
+			info.GetFinalRequestRelayFormat() != info.RelayFormat || mediaErr != nil || mediaType != "application/json" ||
+			encoding != "" && !strings.EqualFold(encoding, "identity") || !replayable {
+			return nil, service.ZenOutputLimitError()
+		}
+		reader, readErr := body.NewReader()
+		if readErr != nil {
+			return nil, service.ZenOutputLimitError()
+		}
+		// DeepSeek 只接受 max_tokens；客户端默认的 max_completion_tokens 已由适配器在转换阶段映射。
+		allowCompletionTokens := info.ChannelType != appconstant.ChannelTypeDeepSeek
+		validationErr := service.ValidateZenOutputBody(reader, admission.APIType, helper.ZenSafeOutputLimit(admission.MaxOutputTokens), allowCompletionTokens)
+		_ = reader.Close()
+		if validationErr != nil {
+			return nil, validationErr
+		}
 	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {

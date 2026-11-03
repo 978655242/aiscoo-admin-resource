@@ -265,7 +265,7 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 
 // A Responses plugin's origin task pins its channel across retries. The
 // managed authority must still be checked against the live ability each time.
-func TestZenOriginTaskRetryRechecksChannelAuthority(t *testing.T) {
+func TestZenOriginTaskPluginFailsClosedAndOrdinaryRetryContinues(t *testing.T) {
 	service.InitHttpClient()
 	db := modelManagementDB(t, "sqlite", "")
 	sqlDB, err := db.DB()
@@ -303,17 +303,10 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 	pinned := pluginruntime.PinnedEndpoint{Generation: generation, Plugin: candidates[0].Plugin, Protocol: candidates[0].Protocol, Operation: candidates[0].Operation, Model: "origin-retry-model", Candidates: candidates}
 
 	var calls atomic.Int32
-	var revoke, failAfterSubmit bool
-	var failChannelLookup atomic.Bool
+	var revoke bool
 	var revokeErr error
 	var submittedKeys []string
 	var channelID int
-	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:origin-channel-failure", func(tx *gorm.DB) {
-		if failChannelLookup.Load() && tx.Statement.Table == "channels" {
-			tx.AddError(errors.New("injected channel lookup failure"))
-		}
-	}))
-	t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove("test:origin-channel-failure")) })
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, readErr := io.ReadAll(r.Body)
 		if !assert.NoError(t, readErr) {
@@ -331,9 +324,6 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 		if calls.Add(1) == 1 {
 			if revoke {
 				revokeErr = db.Model(&model.Ability{}).Where("channel_id = ?", channelID).Update("enabled", false).Error
-			}
-			if failAfterSubmit {
-				failChannelLookup.Store(true)
 			}
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = io.WriteString(w, `{"error":"temporary"}`)
@@ -361,23 +351,19 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 	require.NoError(t, db.Create(&model.ZenAuthorization{UserId: user.Id, SubscriptionId: subscription.Id, Revision: 1}).Error)
 
 	for _, tc := range []struct {
-		name       string
-		managed    bool
-		revoke     bool
-		failLookup bool
-		status     int
-		calls      int32
+		name    string
+		managed bool
+		revoke  bool
+		status  int
+		calls   int32
 	}{
-		{name: "managed still authorized", managed: true, status: http.StatusOK, calls: 2},
+		{name: "managed plugin denied before submission", managed: true, status: http.StatusBadRequest, calls: 0},
 		{name: "ordinary retry unchanged", revoke: true, status: http.StatusOK, calls: 2},
-		{name: "managed lookup failure", managed: true, failLookup: true, status: http.StatusServiceUnavailable, calls: 1},
-		{name: "managed revoked", managed: true, revoke: true, status: http.StatusForbidden, calls: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
 			submittedKeys = nil
-			revoke, failAfterSubmit, revokeErr = tc.revoke, tc.failLookup, nil
-			failChannelLookup.Store(false)
+			revoke, revokeErr = tc.revoke, nil
 			require.NoError(t, db.Model(&model.Ability{}).Where("channel_id = ?", channel.Id).Update("enabled", true).Error)
 			// Reset the polling cursor, then warm the native cache before revocation.
 			common.MemoryCacheEnabled = false
@@ -417,28 +403,27 @@ export function parseTaskResult(){throw new Error("unexpected poll");}
 			require.Equal(t, channel.Id, selected.Id)
 			require.Nil(t, middleware.SetupContextForSelectedChannel(c, selected, pinned.Model))
 			deps := pluginProtocolTestDeps()
+			var capturedTaskError *dto.TaskError
 			deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
 				info.IsPlayground = true
-				return executeTaskSubmission(c, info)
+				outcome, taskErr := executeTaskSubmission(c, info)
+				capturedTaskError = taskErr
+				return outcome, taskErr
 			}
 			serveTaskPluginProtocol(c, pinned, deps)
-			failChannelLookup.Store(false)
 			require.NoError(t, revokeErr)
-			assert.Equal(t, tc.calls, calls.Load(), "only authorized attempts may reach the pinned upstream")
-			if assert.NotEmpty(t, submittedKeys) {
+			assert.Equal(t, tc.calls, calls.Load(), "only allowed attempts may reach the pinned upstream")
+			if tc.calls > 0 && assert.NotEmpty(t, submittedKeys) {
 				assert.Equal(t, "first-key", submittedKeys[0], "the first attempt uses the key already selected by distribution")
+			} else if tc.calls == 0 {
+				assert.Empty(t, submittedKeys)
 			}
 			assert.Equal(t, tc.status, recorder.Code, recorder.Body.String())
-			if tc.managed && tc.status != http.StatusOK {
-				if tc.revoke {
-					assert.Contains(t, recorder.Body.String(), "XCODE_MODEL_UNAVAILABLE")
-				} else {
-					assert.Contains(t, recorder.Body.String(), "XCODE_BACKEND_UNAVAILABLE")
-				}
-				require.Eventually(t, func() bool {
-					var record model.SubscriptionPreConsumeRecord
-					return db.Where("request_id = ?", common.GetContextKeyString(c, common.RequestIdKey)).First(&record).Error == nil && record.Status == "refunded"
-				}, 3*time.Second, 10*time.Millisecond, "managed reservation must finish refunding before database cleanup")
+			if tc.managed {
+				require.NotNil(t, capturedTaskError)
+				assert.True(t, capturedTaskError.LocalError)
+				assert.True(t, capturedTaskError.NoRetry)
+				assert.Contains(t, recorder.Body.String(), "the managed output token limit cannot be verified")
 			}
 		})
 	}

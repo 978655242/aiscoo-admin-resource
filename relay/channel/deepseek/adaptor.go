@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -105,6 +106,15 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
+	}
+	// XCODE: 客户端默认发送 max_completion_tokens；DeepSeek 的可信合同是 max_tokens。
+	// 仅托管转换请求等值改写，透传及普通请求保留原样，最终正文仍须再次验证。
+	if info != nil && info.ClientPurpose == model.ClientPurposeZen && request.MaxCompletionTokens != nil {
+		if request.MaxTokens != nil && *request.MaxTokens != *request.MaxCompletionTokens {
+			return nil, errors.New("conflicting output token limits")
+		}
+		request.MaxTokens = request.MaxCompletionTokens
+		request.MaxCompletionTokens = nil
 	}
 	if err := applyDeepSeekV4OpenAIThinkingSuffix(info, request); err != nil {
 		return nil, err
