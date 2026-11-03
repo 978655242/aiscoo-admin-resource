@@ -40,7 +40,7 @@ type Model struct {
 	Tags               string         `json:"tags,omitempty" gorm:"type:varchar(255)"`
 	VendorID           int            `json:"vendor_id,omitempty" gorm:"index"`
 	Endpoints          string         `json:"endpoints,omitempty" gorm:"type:text"`
-	ZenConfig          LongText       `json:"xcode_config,omitempty" gorm:"column:x_code_config"`
+	ZenConfig          LongText       `json:"-" gorm:"column:x_code_config"` // Historical migration archive only.
 	SupportedEndpoints []string       `json:"supported_endpoints,omitempty" gorm:"-"`
 	Status             int            `json:"status" gorm:"default:1"`
 	SyncOfficial       int            `json:"sync_official" gorm:"default:1"`
@@ -235,11 +235,8 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 }
 
 func (mi *Model) Insert() error {
-	if mi.ZenConfig != "" {
-		if _, err := ParseZenModelMetadata(string(mi.ZenConfig)); err != nil {
-			return err
-		}
-	}
+	// 能力配置由中央发布唯一维护；新模型不再写逐模型历史列。
+	mi.ZenConfig = ""
 	return metadataTransaction(func(tx *gorm.DB) error {
 		if err := validateModelVendor(tx, mi.VendorID); err != nil {
 			return err
@@ -264,13 +261,9 @@ func IsModelNameDuplicated(id int, name string) (bool, error) {
 	return cnt > 0, err
 }
 
-// Update excludes an omitted aiscoo zen patch from the write, even for stale callers.
-func (mi *Model) Update(zenConfig *string) error {
-	if zenConfig != nil && *zenConfig != "" {
-		if _, err := ParseZenModelMetadata(*zenConfig); err != nil {
-			return err
-		}
-	}
+// Update preserves the retired column as historical source data. Legacy Go
+// callers may still pass a patch, but it cannot change execution configuration.
+func (mi *Model) Update(_ ...*string) error {
 	return metadataTransaction(func(tx *gorm.DB) error {
 		if err := validateModelVendor(tx, mi.VendorID); err != nil {
 			return err
@@ -281,10 +274,6 @@ func (mi *Model) Update(zenConfig *string) error {
 		}
 		fields := []string{"model_name", "description", "icon", "tags", "vendor_id", "endpoints", "status", "sync_official", "name_rule", "updated_time"}
 		mi.ZenConfig = current.ZenConfig
-		if zenConfig != nil {
-			mi.ZenConfig = LongText(*zenConfig)
-			fields = append(fields, "x_code_config")
-		}
 		mi.UpdatedTime = common.GetTimestamp()
 		return tx.Model(&Model{}).Where("id = ?", mi.Id).Select(fields).Updates(mi).Error
 	})

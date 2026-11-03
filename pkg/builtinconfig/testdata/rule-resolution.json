@@ -1,0 +1,61 @@
+{
+  "release": {
+    "schemaVersion": 1,
+    "revision": 43,
+    "config": {
+      "providerConfigRules": {
+        "templateRules": [{"templateId":"fixture-template","templateNameMap":{"en-US":"Fixture"},"config":{"api":{"type":"openai-responses","baseUrl":"https://example.invalid/v1"}}}],
+        "providerRules": [{"providerId":"fixture-provider","templateId":"fixture-template","config":{"group":"bigmodel-family"}}]
+      },
+      "modelConfigRules": {
+        "modelRules": [
+          {"modelMatch":".*","config":{"enabled":true,"properties":{"contextWindow":8192,"supportsToolCall":true,"inputFormat":{"supportsText":true,"supportsImage":false}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{\"max_tokens\":maxOutputTokens}"}}}},
+          {"modelMatch":"(?=glm-)glm-(test|other)","config":{"properties":{"contextWindow":16384,"inputFormat":{"supportsImage":true}}}},
+          {"modelMatch":"k","config":{"enabled":false}},
+          {"modelMatch":"(?<part>same)\\k<part>","config":{"properties":{"contextWindow":32768}}}
+        ],
+        "modelApiRules": [{"modelMatch":"glm-.+","apiTypeMatch":"openai-responses","config":{"optionSpecs":{"maxOutputTokens":{"max":64,"map":"{\"max_output_tokens\":maxOutputTokens}"}}}}],
+        "providerSiteRules": [{"modelMatch":"glm-.+","baseUrlMatch":"https://example\\.invalid/v1\\?x=A#B","config":{"properties":{"supportsToolCall":false},"optionSpecs":{"maxOutputTokens":{"max":32}}}}],
+        "templateModelRules": [{"templateId":"fixture-template","modelId":"GLM-Test","config":{"properties":{"inputFormat":null},"optionSpecs":{"reasoningLevel":{"values":["high","off"]}}}}],
+        "builtinProviderModelRules": [{"providerId":"fixture-provider","modelId":"GLM-Test","config":{"enabled":false,"properties":null,"optionSpecs":{"maxOutputTokens":{"map":null}}}}]
+      }
+    }
+  },
+  "cases": [
+    {
+      "name":"all groups preserve false, null, maps and value order",
+      "input":{"providerId":"fixture-provider","templateId":"fixture-template","modelId":"GLM-Test","apiType":"openai-responses","baseUrl":"HTTPS://EXAMPLE.INVALID:443/v1///?x=A#B"},
+      "expected":{"enabled":false,"properties":null,"optionSpecs":{"reasoningLevel":{"values":["high","off"],"map":"{}"},"maxOutputTokens":{"max":32,"map":null}}}
+    },
+    {
+      "name":"model regex ignores case but exact template and provider do not",
+      "input":{"providerId":"FIXTURE-PROVIDER","templateId":"fixture-template","modelId":"glm-test","apiType":"openai-responses","baseUrl":"https://example.invalid/v1?x=A#B"},
+      "expected":{"enabled":true,"properties":{"contextWindow":16384,"supportsToolCall":false,"inputFormat":{"supportsText":true,"supportsImage":true}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":32,"map":"{\"max_output_tokens\":maxOutputTokens}"}}}
+    },
+    {
+      "name":"URL parser resolves escaped dot segments before site matching",
+      "input":{"providerId":"none","modelId":"glm-test","apiType":"openai-responses","baseUrl":"HTTPS://EXAMPLE.INVALID:443/a/%2e%2e/v1/?x=A#B"},
+      "expected":{"enabled":true,"properties":{"contextWindow":16384,"supportsToolCall":false,"inputFormat":{"supportsText":true,"supportsImage":true}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":32,"map":"{\"max_output_tokens\":maxOutputTokens}"}}}
+    },
+    {
+      "name":"API regex stays case sensitive and URL query stays case sensitive",
+      "input":{"providerId":"none","modelId":"GLM-Other","apiType":"OPENAI-RESPONSES","baseUrl":"https://EXAMPLE.invalid:443/v1/?x=a#B"},
+      "expected":{"enabled":true,"properties":{"contextWindow":16384,"supportsToolCall":true,"inputFormat":{"supportsText":true,"supportsImage":true}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{\"max_tokens\":maxOutputTokens}"}}}
+    },
+    {
+      "name":"full-match model expression does not act as substring",
+      "input":{"providerId":"none","modelId":"prefix-glm-test"},
+      "expected":{"enabled":true,"properties":{"contextWindow":8192,"supportsToolCall":true,"inputFormat":{"supportsText":true,"supportsImage":false}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{\"max_tokens\":maxOutputTokens}"}}}
+    },
+    {
+      "name":"JS non-unicode ignore-case does not fold Kelvin sign to k",
+      "input":{"providerId":"none","modelId":"K"},
+      "expected":{"enabled":true,"properties":{"contextWindow":8192,"supportsToolCall":true,"inputFormat":{"supportsText":true,"supportsImage":false}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{\"max_tokens\":maxOutputTokens}"}}}
+    },
+    {
+      "name":"JavaScript named backreference is supported",
+      "input":{"providerId":"none","modelId":"SAMESAME"},
+      "expected":{"enabled":true,"properties":{"contextWindow":32768,"supportsToolCall":true,"inputFormat":{"supportsText":true,"supportsImage":false}},"optionSpecs":{"reasoningLevel":{"values":["off","low","high"],"map":"{}"},"maxOutputTokens":{"max":128,"map":"{\"max_tokens\":maxOutputTokens}"}}}
+    }
+  ]
+}

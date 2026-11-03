@@ -163,12 +163,15 @@ func writeRelayError(c *gin.Context, format types.RelayFormat, apiError *types.N
 	case errors.Is(apiError, service.ErrZenModelUnavailable):
 		message = i18n.T(c, i18n.MsgClientModelUnavailable)
 	}
+	// XCODE: 判断是否为托管输出上限的本地拒绝；须在 SetMessage 替换底层错误前取得（zen-integration.md §6.5）。
+	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
+	managedOutputLimit := managed && errors.Is(apiError, service.ErrZenOutputLimit)
 	apiError.SetMessage(common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)))
 	upstreamURLs := common.UpstreamAddresses(c)
-	managed := common.GetContextKeyString(c, constant.ContextKeyClientPurpose) == model.ClientPurposeZen
 	if format != types.RelayFormatOpenAIRealtime && c.Writer.Written() &&
 		strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
-		writeRelayStreamError(c, format, apiError)
+		// XCODE: 已提交的 SSE 响应走流内错误，并告知是否为托管输出上限的本地拒绝（zen-integration.md §6.5）。
+		writeRelayStreamError(c, format, apiError, managedOutputLimit)
 		return
 	}
 	if managed {
@@ -321,15 +324,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+		// XCODE: 有些适配器不经过共享 HTTP 发送点；托管请求只能进入放行集合内的渠道与协议，其余在调用适配器前本地拒绝（zen-integration.md §6.5）。
+		if relayInfo.ClientPurpose == model.ClientPurposeZen && !service.ZenRelayFormatAllowed(channel.Type, relayFormat) {
+			newAPIError = service.ZenOutputLimitError()
+		} else {
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
 		}
 
 		if newAPIError == nil {
@@ -357,7 +365,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 }
 
-func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError) {
+// XCODE: 新增 managedOutputLimit 参数，仅托管输出上限的本地拒绝才在已提交的 SSE 错误中附加兼容字段（zen-integration.md §6.5）。
+func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError, managedOutputLimit bool) {
 	// 心跳提交响应头后，最终错误继续通过同一个流返回。
 	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
 	if status == nil {
@@ -367,10 +376,29 @@ func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *t
 	status.MarkFailed(string(apiError.GetErrorCode()), string(apiError.GetErrorType()), apiError.StatusCode)
 	upstreamURLs := common.UpstreamAddresses(c)
 	if format == types.RelayFormatClaude {
-		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: relayClaudeErrorBody(c, apiError, upstreamURLs)})
+		body := relayClaudeErrorBody(c, apiError, upstreamURLs)
+		if managedOutputLimit {
+			// XCODE: 响应头已提交为 200；Anthropic 错误需兼容字段 code "400" 以识别不可重试，避免工作流无限重试（zen-integration.md §6.5）。
+			body = gin.H{"type": "invalid_request_error", "code": "400", "message": apiError.ToClaudeError(upstreamURLs...).Message}
+		}
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: body})
 		return
 	}
-	_ = helper.ObjectData(c, gin.H{"error": apiError.ToOpenAIError(upstreamURLs...)})
+	body := apiError.ToOpenAIError(upstreamURLs...)
+	if managedOutputLimit {
+		// XCODE: SSE 已提交为 200，OpenAI 兼容错误需带字符串 code "400"，使客户端识别为不可重试（zen-integration.md §6.5）。
+		body.Code = "400"
+		if format == types.RelayFormatOpenAIResponses {
+			// XCODE: Responses 原生 SDK 要求顶层类型和序号；心跳不消耗事件序号（zen-integration.md §6.5）。
+			payload, err := common.Marshal(gin.H{"type": "error", "sequence_number": 0, "error": body})
+			if err == nil {
+				_ = helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "error"}, string(payload))
+			}
+			helper.Done(c)
+			return
+		}
+	}
+	_ = helper.ObjectData(c, gin.H{"error": body})
 	helper.Done(c)
 }
 
@@ -729,7 +757,14 @@ func executeTaskSubmissionWith(
 		c.Request.Body = io.NopCloser(bodyStorage)
 
 		stage = "submit"
-		result, taskErr = submit(c, relayInfo)
+		if relayInfo.ClientPurpose == model.ClientPurposeZen {
+			// XCODE: 插件可构造任意提交体，宿主无法从声明证明输出 token 上限，故托管任务在生成提交前本地拒绝（zen-integration.md §6.5）。
+			localErr := service.ZenOutputLimitError()
+			taskErr = service.TaskErrorWrapperLocal(localErr, string(types.ErrorCodeInvalidRequest), http.StatusBadRequest)
+			taskErr.NoRetry = true
+		} else {
+			result, taskErr = submit(c, relayInfo)
+		}
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
@@ -1009,7 +1044,12 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 	case taskErr == nil:
 		stop.Reason = "request_completed"
 	case taskErr.NoRetry:
-		stop.Reason = "task_accepted"
+		// XCODE: 限额无法验证时没有提交任务，不能误记为上游已接受（zen-integration.md §6.5）。
+		if taskErr.LocalError && errors.Is(taskErr.Error, service.ErrZenOutputLimit) {
+			stop.Reason = "local_rejection"
+		} else {
+			stop.Reason = "task_accepted"
+		}
 	case service.ShouldSkipRetryAfterChannelAffinityFailure(c):
 		stop.Reason, stop.Source = "strict_session", "session_rule"
 		if source := service.RequestPolicy(c).SessionModeSource; source != "" {

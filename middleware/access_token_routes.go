@@ -166,6 +166,11 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/v1/admin/releases":                                    accessTokenScopeRule("ops:write"),
 	"PATCH /api/v1/admin/releases/:id":                               accessTokenScopeRule("ops:write"),
 
+	// Root-only Built-in configuration uses the existing settings scopes.
+	"GET /api/builtin-provider-config":          accessTokenScopeRule("option:read"),
+	"PUT /api/builtin-provider-config":          accessTokenScopeRule("option:write"),
+	"POST /api/builtin-provider-config/publish": accessTokenScopeRule("option:write"),
+
 	// router/api-router.go: /api/option
 	"GET /api/option/":                                           accessTokenScopeRule("option:read"),
 	"GET /api/option/request_policy":                             accessTokenScopeRule("option:read"),

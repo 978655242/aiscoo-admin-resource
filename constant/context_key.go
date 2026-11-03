@@ -28,6 +28,8 @@ const (
 	ContextKeyFundingSubscriptionID        ContextKey = "funding_subscription_id"
 	ContextKeyFundingAuthorizationRevision ContextKey = "funding_authorization_revision"
 	ContextKeyZenValidatedRequest          ContextKey = "xcode_validated_request"
+	// XCODE: 保存首次准入得到的模型、协议与输出上限快照，渠道重试沿用而不重新解析（zen-integration.md §6.5）。
+	ContextKeyZenModelAdmission ContextKey = "xcode_model_admission"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"

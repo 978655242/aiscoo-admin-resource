@@ -53,6 +53,7 @@ export type JsonCodeEditorProps = Omit<
   textareaRef?: (element: HTMLTextAreaElement | null) => void
   disabled?: boolean
   heightClassName?: string
+  wrapToolbar?: boolean
   placeholder?: string
   ariaLabel?: string
   'data-form-root'?: string
@@ -66,6 +67,7 @@ export function JsonCodeEditor({
   textareaRef,
   disabled,
   heightClassName = 'h-56 min-h-56 max-h-56',
+  wrapToolbar = false,
   placeholder,
   ariaLabel,
   className,
@@ -272,7 +274,14 @@ export function JsonCodeEditor({
       data-form-root={dataFormRoot}
       {...rootProps}
     >
-      <div className='bg-muted/30 flex h-8 items-center justify-between border-b px-2'>
+      {/* XCODE: 仅按需换行工具栏，防止手机和长语言按钮被裁切，保留原默认布局。 */}
+      <div
+        data-slot='json-code-editor-toolbar'
+        className={cn(
+          'bg-muted/30 flex h-8 items-center justify-between border-b px-2',
+          wrapToolbar && 'h-auto min-h-8 flex-wrap gap-y-1 py-1'
+        )}
+      >
         <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs font-medium'>
           <Braces className='h-3.5 w-3.5' aria-hidden='true' />
           <span>{t('JSON')}</span>
@@ -280,7 +289,13 @@ export function JsonCodeEditor({
             {cursorText}
           </span>
         </div>
-        <div className='flex items-center gap-2'>
+        <div
+          data-slot='json-code-editor-actions'
+          className={cn(
+            'flex items-center gap-2',
+            wrapToolbar && 'min-w-0 flex-wrap justify-end'
+          )}
+        >
           <span
             className={cn(
               'flex items-center gap-1 text-xs',

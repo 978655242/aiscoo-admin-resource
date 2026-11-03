@@ -54,9 +54,11 @@ type SettingsPageProps<
 type SettingsPageFrameProps = {
   title: ReactNode
   children: ReactNode
+  stackActionsOnMobile?: boolean
 }
 
-function SettingsPageFrame(props: SettingsPageFrameProps) {
+// XCODE: 复用设置页布局，允许专用管理 API 的页面不依赖通用 Options 查询。
+export function SettingsPageFrame(props: SettingsPageFrameProps) {
   const [actionsContainer, setActionsContainer] =
     useState<HTMLDivElement | null>(null)
   const [titleStatusContainer, setTitleStatusContainer] =
@@ -67,7 +69,8 @@ function SettingsPageFrame(props: SettingsPageFrameProps) {
       actionsContainer={actionsContainer}
       titleStatusContainer={titleStatusContainer}
     >
-      <SectionPageLayout>
+      {/* XCODE: 按需复用窄屏堆叠布局，避免多按钮挤掉标题；其他页面默认布局不变。 */}
+      <SectionPageLayout stackActionsOnMobile={props.stackActionsOnMobile}>
         <SectionPageLayout.Title>
           <span className='inline-flex max-w-full min-w-0 items-center gap-2 align-middle'>
             <span className='truncate'>{props.title}</span>

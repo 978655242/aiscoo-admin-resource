@@ -22,7 +22,7 @@
 - [计费来源选择](../../service/billing_session.go#L379)、[订阅预扣](../../service/funding_source.go#L80)、[实际候选选择](../../model/subscription.go#L1298)、[任务按原实例结算](../../service/task_billing.go#L111)。
 - [模型元数据](../../model/model_meta.go#L35)、[模型编辑界面](../../web/src/features/models/components/drawers/model-mutate-drawer.tsx#L19)、[消费/退款日志](../../model/log.go#L59)、[小时导出数据](../../model/usedata.go#L13)、[数据库迁移注册](../../model/main.go#L342)。
 
-现状不是直接替换 upstream URL 即可完成：订阅预扣目前从用户全部有效订阅中选取；原生 Session JWT 都是面板 audience；模型元数据没有 aiscoo 客户端所需的完整能力结构。上述三个边界必须修改。
+初始基线不能直接替换 upstream URL：订阅预扣从用户全部有效订阅中选取；原生 Session JWT 都是面板 audience；模型元数据没有客户端所需的完整能力结构。资金与身份隔离按下文独立实现；2026-11-02 起能力来源改为 §7 的集中 Built-in 发布配置，不再逐模型维护。
 
 ## 2. 已确认的业务规则
 
@@ -42,7 +42,7 @@
 | 支付       | 仅 aiscoo 客户端入口及凭据禁止自助订阅/支付。New API 原生面板支付继续可用；不能全局关闭其购买路由                               |
 | 用量       | 云端模型统计为 New API 用户全部消费，包含其他原生订阅及钱包；套餐卡只显示指定实例，二者必须标明不同范围                  |
 | 缺失统计   | 保留 UI 卡片，明确显示暂不提供。不能伪造 Agent 时长、工具执行/错误、GLM Pro/Lite 解码速度                                |
-| 模型目录   | 真实授权模型及管理员维护的完整能力元数据；不猜模型别名、上下文长度或工具能力                                             |
+| 模型目录   | 真实授权模型、协议和展示字段；推荐能力由管理员集中发布 Built-in，主流模型复用上游规则                                   |
 | 官方云服务 | Server MCP、闲时/云任务继续官方服务、官方模型与官方计费；需要独立官方登录和真实官方权益                                  |
 | 云凭据     | 按 New API 主用户隔离保存，仅同一主用户可恢复；私有 token 不发送到官方服务                                               |
 | 原模型选择 | 已保存的官方 Plan 选择统一要求重选；不自动映射，即使模型 ID 相同。保留会话历史及自配 Provider                            |
@@ -326,7 +326,55 @@ billing:read/write 是 [现有 PAT 静态 scope catalog](../../service/access_to
 | openai-chat-completions | `POST /v1/chat/completions` | 配置 origin + `/v1`；SDK 补 `/chat/completions` |
 | openai-responses        | `POST /v1/responses`        | 配置 origin + `/v1`；SDK 补 `/responses`        |
 
-Authorization 使用托管 `sk-`。保留 SSE、tool call、reasoning、取消、错误格式及原生 provider 适配；按原生 validator 校验数量，且输出上限不能高于该模型管理员元数据或现有通用上限。不把 control JWT 当作 relay key。
+Authorization 使用托管 `sk-`。保留 SSE、tool call、reasoning、取消、错误格式及原生 provider 适配；按原生 validator 校验数量，且输出上限不能高于已发布集中配置解析出的模型上限或现有通用上限。不把 control JWT 当作 relay key。
+
+托管请求的输出上限与最终发送边界：
+
+- 唯一的业务上限所有者是服务端准入对当前用户、客户端原始 `model_id` 和原生 `api_type` 从已发布集中规则解析出的 `model_config.optionSpecs.maxOutputTokens.max`；现有通用 token 数量校验继续独立生效。一次请求及其所有渠道重试使用该准入结果，请求内值只作为权威结果的快照，不能成为独立维护的第二份配置，也不能替代身份撤销、授权变更与渠道资格的既有实时门禁。
+- 客户端原始模型身份决定授权和上限；渠道模型别名、协议转换与参数覆盖只影响最终上游请求，不能改用上游名称、渠道或插件重新抬高上限。入站超限先按现有语义拒绝，即使后续渠道覆盖会将值调低。
+- 每次选中渠道及重试时，必须在渠道参数覆盖和协议转换实际完成后、发送上游前，对最终请求体中的输出上限字段再做一次参数级校验，确认其不超过该请求的权威上限与现有通用上限。不能只复查入站正文或假定字段名不变；原始透传仍须检查实际发送内容，且校验使用独立读取器，不改写透传字节。
+
+**本方案只校验宿主发出的最终请求参数，不证明上游服务一定遵守该字段。** 渠道类型、任意可配置 Base URL 以及“上游回显字段”都不能证明服务会执行限额：如果某个自定义网关、内部网关或兼容服务静默忽略宿主发出的限额字段，该次生成仍可能超过准入上限。用户已明确选择并接受这一残留风险，原因是官方直连端点、Host、TLS、代理与模型绑定的整套校验会拒绝所有自定义 BaseURL 和内部网关，超出可接受的兼容影响；因此不做这些校验，自定义 BaseURL 与内部网关渠道照常可用。本规格、PR 描述和验收记录都不得把本方案写成“已保证”服务端输出上限，只能写成“已校验最终请求参数”。
+
+放行集合（均为参数级；渠道类型与入站协议必须同时匹配）：
+
+| 入站协议 / 渠道类型                         | 最终请求体接受的限额字段                                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| OpenAI Chat / OpenAI 渠道                   | `max_tokens`、`max_completion_tokens`；同时出现时数值必须相等                                              |
+| OpenAI Responses / OpenAI 渠道              | `max_output_tokens`                                                                                       |
+| Anthropic Messages / Anthropic 渠道         | 必须有 `max_tokens`；旧 `max_tokens_to_sample` 同时出现时数值必须相等                                      |
+| OpenAI Chat / DeepSeek 渠道                 | `max_tokens`；托管转换请求由适配器把客户端默认的 `max_completion_tokens` 等值映射为 `max_tokens`            |
+
+其余一律在调用适配器前本地拒绝：其他渠道类型（含 Gemini、Ollama、AWS 等）、跨协议转换、托管任务插件与媒体插件（宿主无法按 token 校验）、缺失、零值、重复键、冲突字段、非整数、字符串或超过上限的值、以及 Chat 的 `n > 1`。普通非托管请求不进入这些检查，行为保持原样。
+
+- DeepSeek 的专用映射只作用于托管且经适配器转换的 Chat 请求：若两个入站字段同时出现必须相等，转换后正文只保留 `max_tokens`。原始透传不改写正文，因此只带 `max_completion_tokens` 的透传请求仍被拒绝；非托管请求不使用这条映射。
+- 对未知、缺失、不可解析、零值或宿主无法确认其有效语义的最终限额，托管请求暂时拒绝；不能将插件自述视为可信映射。JSON 限额字段及候选数字段只能使用协议规定的规范键名：对经 Unicode 简单大小写折叠后与敏感字段等价的非规范键，以及重复、转义等价或冲突字段，入站和最终正文均须拒绝，包括渠道覆盖与原始透传，避免不同解析器对同一正文得出不同限额。Chat 的 `n` 表示候选数，现有合同未证明多候选总输出仍受单请求上限约束，因此托管请求入站和最终正文仅允许省略 `n` 或显式 `n: 1`；多候选或歧义值暂拒。
+- 发送前拒绝是本地错误，禁止发送上游和继续渠道重试，也不改变渠道健康；若计费预扣已发生，复用现有幂等失败退款路径。响应尚未提交时返回与入站超限一致的 HTTP 400；若 SSE 已提交，则发送相应协议的流内错误，不能伪称状态码仍可更改。仅对本地托管限额拒绝，在已提交的 SSE 错误对象中附加字符串 `code: "400"`，使现有 SDK 与无界工作流识别为不可重试的无效请求；Anthropic 的 `code` 是本客户端兼容扩展，不宣称其属于原生协议。Responses 流内错误还必须具有原生 SDK 所需的顶层 `type: "error"`、`sequence_number: 0` 及嵌套 `error` 字段；此本地错误只能发生在渠道生成流尚未产生事件时，先前心跳不占事件序号。
+- 已知限制：目录 `enabled`、`catalog_revision` 与渠道筛选不感知上述放行集合。仅由被暂拒的渠道类型（如 Gemini、Ollama、AWS）或托管插件提供的模型，目录里仍可能显示为可选，请求时才被本地拒绝并退款。这是授权事实与可执行性未对齐，不是越权，也没有绕过上限；本期不为此修改目录投影、revision 或渠道选择 SQL。
+- 验收使用隔离数据库、本地 HTTP 假上游及真实路由，分别覆盖三种原生协议的上限 128、覆盖 129 拒绝、覆盖 128 成功、入站 129 即使覆盖回 128 仍拒绝、原始透传字节不变、渠道模型映射与重试沿用首次上限、已提交 SSE 的流内错误（含 Responses 原生事件，要求首渠道等待期间真实心跳先提交、上游失败重试、下一渠道本地拒绝，并分别用直接原生 SDK 和客户端包装层验证）、本地错误及不重试、预扣后的幂等退款、不可验证插件拒绝以及普通非托管请求不受影响。首次尝试即拒绝时不得调用上游；先有合法尝试后再遇到违规渠道时，违规尝试及后续尝试不得发起生成提交。插件构造期间允许的 GET/HEAD 不等同于生成提交，不将后者为零误写成全部网络调用为零。验收只使用 SQLite；MySQL 与 PostgreSQL 未运行，因为本方案不改变任何 GORM 查询、事务或迁移。
+
+```mermaid
+sequenceDiagram
+    participant Client as Native 客户端
+    participant Admission as 准入/集中配置
+    participant Billing as 计费
+    participant Relay as 当前渠道中转
+    participant Upstream as 上游
+    Client->>Admission: 原始 model_id、协议和输出上限
+    Admission->>Admission: 授权并解析唯一业务上限
+    Admission->>Billing: 准入成功后预扣
+    loop 每次渠道尝试
+        Billing->>Relay: 准入模型身份与上限快照
+        Relay->>Relay: 渠道映射、转换及参数覆盖
+        Relay->>Relay: 校验最终请求体的输出上限参数
+        alt 合法
+            Relay->>Upstream: 发送最终请求
+        else 超限、歧义或不在放行集合
+            Relay-->>Client: 未提交时 400；已提交 SSE 时流内错误
+            Relay->>Billing: 停止重试并沿用失败退款
+        end
+    end
+```
 
 | HTTP / code                                                               | 条件                                              |
 | ------------------------------------------------------------------------- | ------------------------------------------------- |
@@ -344,36 +392,64 @@ Authorization 使用托管 `sk-`。保留 SSE、tool call、reasoning、取消�
 
 原生 Session 限额/refresh mismatch/replay 使用既有稳定错误；上游模型错误及限流保持原生协议 envelope，不能一律伪装成套餐不足。Facade 的模型授权错误需映射为对应 OpenAI/Anthropic 错误 envelope，并保留上述可辨别 code。
 
-## 7. 管理员模型元数据
+## 7. 集中客户端 Built-in 配置
 
-### 7.1 目录来源与契约
+2026-11-02 产品决策：由 aiscoo-admin 集中管理与发布客户端 Built-in，取代逐模型 `xcode_config` 参数维护。账号目录、路由和额度仍由既有服务管理。
 
-`GET /models` 返回 `{schema_version,server_time,catalog_revision,authorization_revision,models}`。模型集合来自当前用户原生分组、启用 channel/ability 与真实可用 model ID；不返回 channel key、上游 URL 或管理员信息。每项：
+### 7.1 上游兼容下载合同
 
-`{model_id,display_name,icon,api_type,enabled,disabled_reason,model_config}`。
+- 公共 `GET /api/v1/client/configs?app_version=...&platform=...` 返回 `{code:0,data:{configs:{builtin_provider_config_json:"<绝对 HTTP(S) 版本 URL>"}}}`；未发布时可省略该字段。响应不套原生 `success` envelope。
+- 版本 URL 匿名只读，直接返回 `{schemaVersion:1,revision,config:{providerConfigRules,modelConfigRules}}`。完整内容遵循 ZCode Built-in schema，不改键名、规则层级、组内顺序、显式 false/null 或协议参数映射。
+- 下载 URL 由已校验的部署 origin 生成，不采用任意请求 Host；不要求登录、不重定向、不携带账号或渠道凭据。接口发现允许重验证，版本正文按摘要寻址并保持不可变，旧 URL 继续可读。
 
-- icon 是管理端模型列表同一取值：模型 `icon`，为空时取所属供应商 `icon`，两者都为空则为 null；值为 @lobehub/icons 图标名（如 `Claude.Color`、`OpenAI`），客户端按同名渲染，未知名称回落客户端默认图标。icon 仅为展示元数据，不参与授权或执行判定；它属于目录事实，变化会改变 catalog_revision，使客户端刷新后显示新图标。
+### 7.2 管理、发布与持久化
 
-- model_id 是原生 relay 的真实请求 ID；配置有效时 api_type 为三选一，由管理员配置。缺失/无效协议时 api_type=null、enabled=false、disabled_reason=model_metadata_missing 或 model_metadata_invalid。
-- model_config 内部字段使用 aiscoo 客户端现有 camelCase schema，避免另创能力命名：`{enabled,properties,optionSpecs}`；外层仍为 snake_case。缺失/结构无效时 model_config=null；不能为 disabled 行猜一个协议或能力配置。
-- `properties`：requiresMfjsToolSchema；contextWindow 正整数；inputFormat 的 supportsText/Image/Video/Audio/Pdf 全部显式布尔；outputFormat.supportsText；supportsToolCall/JsonSchemaOutput/NativeWebSearch/MidConversationSystem 全部显式布尔。
-- `optionSpecs.reasoningLevel={values,map}`：values 非空、唯一、按语义由低到高；map 为受限 CEL 表达式。无 reasoning 的模型使用真实 neutral 配置 `values:["off"], map:"{}"`，不是假 reasoning 能力。
-- 关闭档位必须映射为实际供应商接受的明确关闭参数；`map:"{}"` 只表示不覆盖请求，不证明思考关闭。非思考 neutral 配置不能套给默认开启思考的模型。各 exact model 的档位、顺序、上下文与输出上限按实际渠道契约维护，不按模型名预填或统一补 `low/medium/high`。
-- `optionSpecs.maxOutputTokens={max,map}`：max 为真实正整数；map 将选定上限映射到协议参数。不能把一个协议的 max_tokens 映射套给 Responses。
+- 系统设置的模型设置内增加“内置提供商配置”，仅 root 管理。复用现有 JSON 编辑、导入/导出、格式化、保存草稿、发布确认和离开保护。
+- 发布前在服务端验证 Release envelope、全部规则结构、整数边界、匹配表达式和敏感字段。真实 URL 的查询参数及 Header 仅允许明确的公开非敏感清单；含 `key`、`token` 或 `X-Auth-Token` 等凭据入口的导入必须拒绝，即使值没有常见密钥前缀。匹配正则不作为真实 URL 解析。客户端继续使用上游受限参数映射编译器，不运行任意 JS。
+- 复用 Options 存储草稿、发布指针、不可变版本正文与迁移归档；这些内部键不能从通用配置 API 泄露或被通用 PUT 绕过校验。
+- 管理接口合同：`GET /api/builtin-provider-config` 返回原生 `{success:true,data:{version,draft_json,published_revision,published_url,migration_issues}}`；`PUT` 接受 `{expected_version,draft_json}` 保存已校验草稿；`POST /api/builtin-provider-config/publish` 接受 `{expected_version}` 发布已保存草稿。冲突返回 HTTP 409，失败保留当前草稿及发布版本。
+- 发布在事务中校验 expected version、保存正文并切换指针；revision 为不超过 9007199254740991 的单调整数，首版高于当前客户端随包 revision。回退内容也产生新 revision，不能覆盖旧 URL。草稿和发布状态以服务端返回为唯一事实。
 
-wire 形状与编译契约依据 [XCode shared model schema](../../../XCode/packages/shared/src/model-config.ts#L21) 和 [受限 option-map 编译器](../../../XCode/packages/model-option-map/src/compiler.ts#L35)。New API 根模块不导入 XCode 包或 Node runtime。
+### 7.3 目录、请求与迁移
 
-### 7.2 校验与失效
+- `GET /models` 的集合仍来自当前用户组、启用 channel/ability 与真实模型 ID；名称、图标和协议作为目录字段保留。后台模型上架不再填写完整能力 JSON，模型编辑请求不再修改旧逐模型字段。
+- 新客户端从集中 Built-in 与个人规则合成能力，不消费 `/models.model_config`。旧客户端所需 `model_config` 暂由同一集中配置自动投影，不维护或回写第二份参数。
+- 服务端目录可用性及模型输出上限读取已发布集中规则，保留真实路由、模型状态、组、授权和通用 token 安全校验。集中规则的模型/协议/站点/模板/Provider 精确覆盖顺序须与上游一致。
+- 初始化以当前客户端 Built-in 为基线，将有效历史 `xcode_config` 转为集中精确规则，保留上下文、能力、档位顺序、表达式及协议；原文保留归档。已存在集中配置不覆盖人工修改；冲突和无效记录明确返回迁移问题。迁移可重复执行且不丢数据。
+- 同名候选渠道必须符合所发布配置；不一致时由管理员拆分别名。配置声明不等于真实供应商验证。个人编辑不能放宽服务端授权或 token 上限。
+- catalog_revision 覆盖实际目录、协议、配置及授权变化；换号或撤权仍先使旧快照不可执行。发布成功不等于客户端 Worker 已应用，客户端仍检查 owner 与 applied revision。
 
-- 增加原生模型编辑器的 aiscoo 客户端配置区域，复用 JsonEditor；默认未配置即不能成为可执行的私有 Agent 模型，不能预填猜测能力。
-- ZenConfig 的存储形状固定为 `{schema_version:1,api_type,model_config}`；编辑接口复用原生模型权限，保留不相关字段，不能通过同步官方描述擦掉该配置。
-- 对具体可执行 model ID 要有 exact-name 元数据。仅有 prefix/suffix/contains 描述匹配不足以证明每个实际模型的能力。
-- 服务端验证 JSON schema/version、必填布尔、整数边界、api_type、values 唯一性、map 非空及长度边界；模型配置文档限 64 KiB、单 map 限 8 KiB。请求中显式 false/0 不得被 omitempty 吞掉。
-- Go 端不实现第二个 CEL 编译器。Host 使用现有受限编译器验证 map，拒绝未知标识符/非法结果；不能使用 eval/任意 JS。语义编译失败时该模型 disabled 并提示管理员修复，不使用内置 GLM 或人工猜测 fallback。
-- 同 model_id 的所有候选上游必须满足声明能力/协议。能力不同的上游应由管理员暴露不同原生 model alias；不能随机路由到不满足 tools/images/context 的 channel。
-- 模型别名、原生 channel 参数覆盖及 pass-through/协议分流必须与声明一致；目录结构/CEL 校验不代替供应商能力验证。管理员更新模型须保留 fresh 完整表单的非配置字段，原生 PUT 不是字段级 PATCH。`catalog_revision` 表示服务端目录事实，不证明客户端 Worker 已应用；客户端刷新与执行规则见 [aiscoo 客户端动态能力规格](../../../XCode/docs/xcode/specs/new-api-integration.md#521-服务端能力声明与思考控制一致性)。
-- 同一模型未经配置、非 Agent 聊天格式、禁用或能力结构无效时仍可显示不可用原因；不能提供一个看似可执行的默认大上下文。
-- catalog_revision 覆盖可用模型、协议、能力及授权相关变化；撤销/换账号先使快照不可执行，再加载新目录，不继续执行旧用户快照。
+
+```mermaid
+sequenceDiagram
+    participant UI as root 管理界面
+    participant Store as 配置发布所有者 / Options
+    participant Client as Aiscoo 上游下载器
+    UI->>Store: 保存草稿（expected_version）
+    UI->>Store: 发布已保存草稿（expected_version）
+    Store->>Store: 原子写入不可变正文及发布指针
+    Store-->>UI: 新 version / published_revision
+    Client->>Store: GET /api/v1/client/configs
+    Store-->>Client: builtin_provider_config_json
+    Client->>Store: GET 摘要版本 URL
+    Store-->>Client: 原格式 Release JSON
+```
+
+### 7.4 验收
+
+1. 同一 Release 可由上游客户端解码器直接接受；公共接口无认证且不泄露内部配置，非 root 无法保存或发布。
+2. 管理界面导入、保存、发布、回读、导出及失败保留编辑内容；并发版本冲突不覆盖其他管理员修改。两个发布请求使用同一 `expected_version` 时，恰好一个成功、另一个返回 409，已发布版本及正文与成功响应一致。
+3. 没有逐模型 JSON 的新模型可使用集中规则；既有有效参数迁移不变，坏旧记录可追溯，重复初始化幂等。
+4. 旧版本 URL 不变，失败发布事务回滚，旧客户端兼容投影和新客户端规则结果一致。
+5. SQLite、MySQL、PostgreSQL 的新库、升级和重复启动验证通过；测试使用隔离库，不操作生产数据。
+
+### 7.5 2026-11-03 本机验证记录
+
+- Go `1.27.2`、`CGO_ENABLED=0`：`TestBuiltinReleaseValidationAndSharedResolution`、`TestBuiltinConfigDatabaseMatrix` 及既有目录、请求、CRUD、资金回归通过；Router/Middleware 的托管凭据与 PAT 路由回归通过。`go build -mod=readonly ./...` 通过。宿主默认 CGO 编译受 Xcode license 限制，本轮未修改系统许可。
+- 实际数据库为 SQLite `3.50.4`、MySQL `8.0.46`、PostgreSQL `16.14`。三库验证包含完整 252,317 字节基线的存储/重载、有效与坏旧记录迁移、两次初始化、并发保存 CAS、发布版本冲突、旧 URL、不完整事务回滚、safe integer 边界、公开配置凭据拒绝及旧客户端兼容投影，均未跳过。`TestZenPurposePersistenceDatabaseMatrix` 另覆盖三库 fresh/released fixture/pre-T7 与每个场景三次生产初始化。
+- 并发发布补充回归：在上述三种隔离数据库上运行 `CGO_ENABLED=0 go test -mod=readonly ./controller -run '^TestBuiltinConfigDatabaseMatrix$' -count=1 -v`，三库的 `concurrent_publication_accepts_one_expected_version` 子例均通过、无 skip。两个同进程 Gin HTTP 测试请求使用相同版本竞争，断言一个 200、一个 409，以及成功响应、数据库状态与发布正文一致；未验证跨进程竞争。
+- 管理前端四个目标测试文件 43/43 通过，实际 TypeScript `6.0.3` 的 `tsc -b`、受影响源码 Lint、格式及生产构建通过；七语言文案已补齐。`bun run typecheck` 因缺少 `check` 脚本失败，全库 Lint 的 146 错误/65 警告与 `release@58bc6e3c6` 基线逐条一致，不能写成全库门禁通过。
+- 共享七例规则 fixture 由客户端原规则解析器逐项核验，另用 `upstream/main@a60ba6a7` 的原始规则 schema 校验。浏览器在全新 SQLite/临时 root 账号下编辑、保存并确认发布，原客户端下载器经过配置发现与版本 URL 两次 GET 收到修改值；最终服务重启后仍能下载同一已发布 revision。没有读取真实账号、修改线上配置或执行生产推理。
 
 ## 8. 账号级用量
 

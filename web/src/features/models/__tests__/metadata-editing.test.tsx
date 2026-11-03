@@ -24,7 +24,6 @@ import {
   waitFor,
   cleanup,
   act,
-  within,
   fireEvent,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -83,7 +82,7 @@ const zenConfig = JSON.stringify({
   },
 })
 
-function renderZenEditor(storedConfig = '') {
+function renderMetadataEditor(storedConfig = '') {
   useAuthStore.getState().auth.setUser({ id: 2, username: 'admin', role: 10 })
   const storedModel = { ...model, xcode_config: storedConfig }
   vi.spyOn(api, 'get').mockImplementation(async (url) => ({
@@ -349,104 +348,38 @@ describe('model pricing entry', () => {
 })
 
 describe('metadata editing', () => {
-  it('starts aiscoo configuration empty and saves complete JSON with explicit false values', async () => {
-    const { put, client } = renderZenEditor()
-    const user = userEvent.setup()
-    const area = await screen.findByRole('region', {
-      name: 'aiscoo configuration',
-    })
-    expect(
-      within(area).getByText(
-        'No aiscoo configuration. Add complete JSON to enable this model for aiscoo.'
+  it.each([
+    { name: 'empty', config: '' },
+    { name: 'valid legacy', config: zenConfig },
+    { name: 'invalid legacy', config: '{"broken":' },
+  ])(
+    'saves metadata without exposing or overwriting $name per-model configuration',
+    async ({ config }) => {
+      const { put, client } = renderMetadataEditor(config)
+      const user = userEvent.setup()
+      const description = await screen.findByLabelText('Description')
+      await waitFor(() => expect(description).toHaveValue('Original'))
+      expect(
+        screen.queryByRole('region', { name: 'aiscoo configuration' })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Clear aiscoo configuration' })
+      ).not.toBeInTheDocument()
+      await user.clear(description)
+      await user.type(description, 'Updated description')
+      await user.click(
+        screen.getByRole('switch', { name: 'Allow metadata sync' })
       )
-    ).toBeVisible()
-    await user.click(within(area).getByRole('button', { name: 'JSON Mode' }))
-    const editor = within(area).getByRole('textbox')
-    expect(editor).toHaveValue('')
-    fireEvent.input(editor, { target: { value: zenConfig } })
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    await waitFor(() => expect(put).toHaveBeenCalled())
-    const payload = put.mock.calls[0][1] as { xcode_config: string }
-    expect(typeof payload.xcode_config).toBe('string')
-    expect(JSON.parse(payload.xcode_config)).toEqual(JSON.parse(zenConfig))
-    client.clear()
-  })
-
-  it('keeps nested objects and false booleans typed when editing visual Zen rows', async () => {
-    const { put, client } = renderZenEditor(zenConfig)
-    const user = userEvent.setup()
-    const area = await screen.findByRole('region', {
-      name: 'aiscoo configuration',
-    })
-    const config = JSON.parse(zenConfig)
-    const nestedValue = within(area).getByDisplayValue(
-      JSON.stringify(config.model_config)
-    )
-    const updated = {
-      ...config,
-      model_config: { ...config.model_config, enabled: false },
+      await user.click(screen.getByRole('button', { name: 'Save metadata' }))
+      await waitFor(() => expect(put).toHaveBeenCalled())
+      expect(put.mock.calls[0][1]).toMatchObject({
+        description: 'Updated description',
+        sync_official: 0,
+      })
+      expect(put.mock.calls[0][1]).not.toHaveProperty('xcode_config')
+      client.clear()
     }
-    fireEvent.change(nestedValue, {
-      target: { value: JSON.stringify(updated.model_config) },
-    })
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    await waitFor(() => expect(put).toHaveBeenCalled())
-    const payload = put.mock.calls[0][1] as { xcode_config: string }
-    expect(JSON.parse(payload.xcode_config)).toEqual(updated)
-    client.clear()
-  })
-
-  it('retains loaded aiscoo configuration when description and official sync preference change', async () => {
-    const { put, client } = renderZenEditor(zenConfig)
-    const user = userEvent.setup()
-    const description = await screen.findByLabelText('Description')
-    await user.clear(description)
-    await user.type(description, 'Updated description')
-    await user.click(
-      screen.getByRole('switch', { name: 'Allow metadata sync' })
-    )
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    await waitFor(() => expect(put).toHaveBeenCalled())
-    expect(put.mock.calls[0][1]).toMatchObject({
-      description: 'Updated description',
-      sync_official: 0,
-      xcode_config: zenConfig,
-    })
-    client.clear()
-  })
-
-  it('blocks invalid Zen JSON without sending a cleared configuration', async () => {
-    const { put, client } = renderZenEditor(zenConfig)
-    const user = userEvent.setup()
-    const area = await screen.findByRole('region', {
-      name: 'aiscoo configuration',
-    })
-    await user.click(within(area).getByRole('button', { name: 'JSON Mode' }))
-    const editor = within(area).getByRole('textbox')
-    fireEvent.input(editor, { target: { value: '{"broken":' } })
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    expect(await within(area).findByText('Invalid JSON format')).toBeVisible()
-    expect(editor).toHaveValue('{"broken":')
-    expect(put).not.toHaveBeenCalled()
-    client.clear()
-  })
-
-  it('sends an empty string only after explicitly clearing aiscoo configuration', async () => {
-    const { put, client } = renderZenEditor(zenConfig)
-    const user = userEvent.setup()
-    const area = await screen.findByRole('region', {
-      name: 'aiscoo configuration',
-    })
-    expect(put).not.toHaveBeenCalled()
-    await user.click(
-      within(area).getByRole('button', { name: 'Clear aiscoo configuration' })
-    )
-    expect(put).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Save metadata' }))
-    await waitFor(() => expect(put).toHaveBeenCalled())
-    expect(put.mock.calls[0][1]).toMatchObject({ xcode_config: '' })
-    client.clear()
-  })
+  )
 
   it.each([
     {
@@ -516,10 +449,10 @@ describe('metadata editing', () => {
         expect.objectContaining({
           model_name: 'unique-model',
           description: 'Keep this draft',
-          xcode_config: '',
         }),
         { skipBusinessError: true, skipErrorHandler: true }
       )
+      expect(post.mock.calls.at(-1)?.[1]).not.toHaveProperty('xcode_config')
       client.clear()
     }
   )

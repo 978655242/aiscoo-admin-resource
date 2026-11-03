@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { IoNetDeploymentSettingsSection } from '../integrations/ionet-deployment-settings-section'
 import type { ModelSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { BuiltinProviderConfigSection } from './builtin-provider-config-section'
 import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
@@ -35,6 +36,12 @@ function formatJsonForEditor(value: string, fallback: string) {
 }
 
 const MODELS_SECTIONS = [
+  // XCODE: 与专用发布 API 共享模型设置导航和 root 路由权限。
+  {
+    id: 'builtin-provider-config',
+    titleKey: 'Built-in provider configuration',
+    build: () => <BuiltinProviderConfigSection />,
+  },
   {
     id: 'global',
     titleKey: 'Global Model Configuration',

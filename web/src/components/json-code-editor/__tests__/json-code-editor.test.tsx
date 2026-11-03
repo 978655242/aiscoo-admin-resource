@@ -100,6 +100,29 @@ describe('JsonCodeEditor component', () => {
     expect(textarea).toHaveValue('{"count":3}')
   })
 
+  test('wraps toolbar groups on compact settings pages and keeps format keyboard accessible', async () => {
+    const onChange = vi.fn()
+    render(
+      <JsonCodeEditor
+        value='{"enabled":false}'
+        onChange={onChange}
+        wrapToolbar
+      />
+    )
+    const format = screen.getByRole('button', { name: 'Format JSON' })
+    expect(format.closest('[data-slot=json-code-editor-toolbar]')).toHaveClass(
+      'flex-wrap',
+      'h-auto'
+    )
+    expect(format.closest('[data-slot=json-code-editor-actions]')).toHaveClass(
+      'flex-wrap',
+      'min-w-0'
+    )
+    format.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(onChange).toHaveBeenCalledWith('{\n  "enabled": false\n}')
+  })
+
   test('formats valid JSON through the public toolbar action', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
