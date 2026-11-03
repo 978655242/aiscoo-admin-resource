@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { SettingsPage } from '../components/settings-page'
+import { useParams } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
+
+import { SettingsPage, SettingsPageFrame } from '../components/settings-page'
 import type { ModelSettings } from '../types'
 import {
   MODELS_DEFAULT_SECTION,
@@ -69,6 +72,25 @@ const defaultModelSettings: ModelSettings = {
 }
 
 export function ModelSettings() {
+  const { section } = useParams({
+    from: '/_authenticated/system-settings/models/$section',
+  })
+  const { t } = useTranslation()
+  // XCODE: 集中配置只使用专用 API，复用既有外框而不读取通用 Options。
+  if (section === 'builtin-provider-config') {
+    return (
+      <SettingsPageFrame
+        stackActionsOnMobile
+        title={
+          <span className='text-foreground'>
+            {t(getModelsSectionMeta(section).titleKey)}
+          </span>
+        }
+      >
+        {getModelsSectionContent(section, defaultModelSettings)}
+      </SettingsPageFrame>
+    )
+  }
   return (
     <SettingsPage
       routePath='/_authenticated/system-settings/models/$section'

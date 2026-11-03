@@ -82,6 +82,8 @@ func zenCatalogFixture(t *testing.T, db *gorm.DB) model.User {
 	for _, ability := range []model.Ability{{Group: "catalog", Model: "orphan", ChannelId: 999, Enabled: true}, {Group: "catalog", Model: "channel-off", ChannelId: 99, Enabled: true}, {Group: "catalog", Model: "ability-off", ChannelId: 1, Enabled: false}, {Group: "other", Model: "other-group", ChannelId: 1, Enabled: true}} {
 		require.NoError(t, db.Create(&ability).Error)
 	}
+	t.Setenv("XCODE_PUBLIC_ORIGIN", "http://127.0.0.1:59080")
+	require.NoError(t, model.InitializeBuiltinProviderConfig(db))
 	return user
 }
 
@@ -108,7 +110,7 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				names = append(names, entry.ModelID)
 			}
 			assert.Equal(t, []string{"chat", "claude", "config-disabled", "disabled", "invalid", "missing", "prefix-real", "responses"}, names)
-			expectedReasons := map[string]string{"missing": "model_metadata_missing", "prefix-real": "model_metadata_missing", "invalid": "model_metadata_invalid", "disabled": "model_disabled", "config-disabled": "model_config_disabled"}
+			expectedReasons := map[string]string{"invalid": "model_config_disabled", "disabled": "model_disabled", "config-disabled": "model_config_disabled"}
 			for _, entry := range snapshot.Models {
 				assert.Equal(t, entry.ModelID, entry.DisplayName)
 				expectedIcon := map[string]string{"chat": "OpenAI", "claude": "Claude.Color"}[entry.ModelID]
@@ -132,9 +134,9 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 					require.NoError(t, err)
 					assert.Equal(t, "catalog", validatedGroup)
 				}
-				if entry.ModelID == "missing" || entry.ModelID == "prefix-real" || entry.ModelID == "invalid" {
-					assert.Nil(t, entry.APIType)
-					assert.Nil(t, entry.ModelConfig)
+				if entry.ModelID == "missing" || entry.ModelID == "prefix-real" {
+					assert.NotNil(t, entry.APIType)
+					assert.NotNil(t, entry.ModelConfig, "central baseline supplies models without per-model JSON")
 				}
 			}
 			response := httptest.NewRecorder()
@@ -162,17 +164,12 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				var metadata model.Model
 				require.NoError(t, db.Where("model_name = ?", "chat").First(&metadata).Error)
 				original := string(metadata.ZenConfig)
-				defer func() { require.NoError(t, metadata.Update(&original)) }()
+				defer publishZenTestMetadata(t, "chat", original)
+
 				optionMap := `reasoningLevel == "disabled" ? {"thinking":{"type":"disabled"},"reasoning_effort":null} : {"thinking":{"type":"enabled"},"reasoning_effort":reasoningLevel}`
 				updated := strings.Replace(original, `"values":["off"],"map":"{}"`, fmt.Sprintf(`"values":["disabled","low","high","max"],"map":%q`, optionMap), 1)
-				metadata.ZenConfig = model.LongText(updated)
-				var saved struct {
-					Success bool
-					Data    model.Model
-				}
-				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", metadata, &saved)
-				require.True(t, saved.Success)
-				assert.Equal(t, updated, string(saved.Data.ZenConfig))
+				publishZenTestMetadata(t, "chat", updated)
+
 				after := get()
 				assert.NotEqual(t, before.CatalogRevision, after.CatalogRevision)
 				assert.Equal(t, before.AuthorizationRevision, after.AuthorizationRevision)
@@ -189,10 +186,10 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 			previous := snapshot.CatalogRevision
 			for _, update := range []func(){
 				func() {
-					require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "chat").Update("x_code_config", strings.Replace(zenModelConfigFixture("openai-chat-completions"), `"max":128`, `"max":64`, 1)).Error)
+					publishZenTestMetadata(t, "chat", strings.Replace(zenModelConfigFixture("openai-chat-completions"), `"max":128`, `"max":64`, 1))
 				},
 				func() {
-					require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "chat").Update("x_code_config", zenModelConfigFixture("openai-responses")).Error)
+					publishZenTestMetadata(t, "chat", zenModelConfigFixture("openai-responses"))
 				},
 				func() { require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 1).Update("type", 14).Error) },
 				func() {
@@ -362,6 +359,8 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				}
 				exact := model.Model{ModelName: "metadata-first", NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(strings.Replace(zenModelConfigFixture("openai-chat-completions"), `"max":128`, `"max":64`, 1))}
 				require.NoError(t, db.Create(&exact).Error)
+				publishZenTestMetadata(t, exact.ModelName, string(exact.ZenConfig))
+
 				channel := model.Channel{Id: 207, Name: "metadata-first", Type: constant.ChannelTypeOpenAI, Key: "secret", Status: common.ChannelStatusEnabled}
 				require.NoError(t, db.Create(&channel).Error)
 				require.NoError(t, db.Create(&model.Ability{Group: "catalog", Model: exact.ModelName, ChannelId: channel.Id, Enabled: true}).Error)
@@ -386,9 +385,9 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				_, err = service.ValidateZenModelRequest(user.Id, "metadata-first", "openai-responses", common.GetPointer(uint(1)))
 				assert.ErrorIs(t, err, service.ErrZenModelUnavailable)
 				require.NoError(t, db.Delete(&exact).Error)
-				assert.False(t, entry().Enabled, "collation-equivalent metadata cannot replace missing exact authority")
+				assert.True(t, entry().Enabled, "central rules remain authoritative when per-model metadata is absent")
 				_, err = service.ValidateZenModelRequest(user.Id, "metadata-first", "openai-chat-completions", common.GetPointer(uint(1)))
-				assert.ErrorIs(t, err, service.ErrZenModelUnavailable)
+				assert.NoError(t, err)
 			})
 			t.Run("effective route revisions and availability", func(t *testing.T) {
 				channel := model.Channel{Id: 301, Name: "route", Type: constant.ChannelTypeAdvancedCustom, Key: "route-credential", Status: common.ChannelStatusEnabled}
@@ -399,6 +398,8 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				require.NoError(t, db.Create(&channel).Error)
 				require.NoError(t, db.Create(&model.Ability{Group: "catalog", Model: "route-model", ChannelId: channel.Id, Enabled: true}).Error)
 				require.NoError(t, db.Create(&model.Model{ModelName: "route-model", NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(zenModelConfigFixture("openai-responses"))}).Error)
+				publishZenTestMetadata(t, "route-model", zenModelConfigFixture("openai-responses"))
+
 				routeEntry := func() zenDTO.ZenCatalogModel {
 					t.Helper()
 					for _, entry := range get().Models {
@@ -455,7 +456,7 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 					settings.AdvancedCustom.Routes[0].IncomingPath = protocol.path
 					settings.AdvancedCustom.Routes[0].Models = []string{"route-model"}
 					save()
-					require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "route-model").Update("x_code_config", zenModelConfigFixture(protocol.apiType)).Error)
+					publishZenTestMetadata(t, "route-model", zenModelConfigFixture(protocol.apiType))
 					assert.True(t, routeEntry().Enabled, protocol.apiType)
 					validatedGroup, err = service.ValidateZenModelRequest(user.Id, "route-model", protocol.apiType, common.GetPointer(uint(1)))
 					require.NoError(t, err)
@@ -470,7 +471,11 @@ func TestZenCatalogDatabaseMatrix(t *testing.T) {
 				native := model.Channel{Id: 302, Name: "eligible", Type: constant.ChannelTypeOpenAI, Key: "secret", Status: common.ChannelStatusEnabled}
 				require.NoError(t, db.Create(&native).Error)
 				require.NoError(t, db.Create(&model.Ability{Group: "catalog", Model: "route-model", ChannelId: native.Id, Enabled: true}).Error)
-				assert.True(t, routeEntry().Enabled, "a selectable candidate restores route availability")
+				assert.False(t, routeEntry().Enabled, "conflicting candidates require separate model aliases")
+				settings.AdvancedCustom.Routes[0].Models = []string{"route-model"}
+				save()
+				assert.True(t, routeEntry().Enabled, "consistent selectable candidates restore availability")
+
 				validatedGroup, err = service.ValidateZenModelRequest(user.Id, "route-model", "openai-responses", common.GetPointer(uint(1)))
 				require.NoError(t, err)
 				assert.Equal(t, "catalog", validatedGroup)
@@ -533,11 +538,11 @@ func TestZenManagedRequestValidation(t *testing.T) {
 			{"absent output bound", protocol.modelID, "", 400, "invalid_request"},
 			{"above metadata maximum", protocol.modelID, fmt.Sprintf(`,%q:129`, protocol.field), 400, "invalid_request"},
 			{"native safety maximum", protocol.modelID, fmt.Sprintf(`,%q:%d`, protocol.field, uint64(math.MaxInt32)), 400, ""},
-			{"missing metadata", "missing", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
+			{"central configuration without metadata", "missing", fmt.Sprintf(`,%q:1`, protocol.field), map[bool]int{true: 0, false: 403}[protocol.apiType == "openai-chat-completions"], "XCODE_MODEL_UNAVAILABLE"},
 			{"invalid metadata", "invalid", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
 			{"disabled metadata", "disabled", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
 			{"disabled configuration", "config-disabled", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
-			{"prefix metadata only", "prefix-real", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
+			{"prefix metadata uses central baseline", "prefix-real", fmt.Sprintf(`,%q:1`, protocol.field), map[bool]int{true: 0, false: 403}[protocol.apiType == "openai-chat-completions"], "XCODE_MODEL_UNAVAILABLE"},
 			{"unavailable real model", "orphan", fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
 			{"case is not alias", strings.ToUpper(protocol.modelID), fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},
 			{"whitespace is not alias", " " + protocol.modelID, fmt.Sprintf(`,%q:1`, protocol.field), 403, "XCODE_MODEL_UNAVAILABLE"},

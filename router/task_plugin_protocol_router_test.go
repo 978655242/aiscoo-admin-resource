@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/builtinconfig"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -36,11 +37,41 @@ func productionZenConfig(apiType string) string {
 	return fmt.Sprintf(`{"schema_version":1,"api_type":%q,"model_config":{"enabled":true,"properties":{"requiresMfjsToolSchema":false,"contextWindow":8192,"inputFormat":{"supportsText":true,"supportsImage":false,"supportsVideo":false,"supportsAudio":false,"supportsPdf":false},"outputFormat":{"supportsText":true},"supportsToolCall":true,"supportsJsonSchemaOutput":false,"supportsNativeWebSearch":false,"supportsMidConversationSystem":false},"optionSpecs":{"reasoningLevel":{"values":["off"],"map":"{}"},"maxOutputTokens":{"max":128,"map":%q}}}}`, apiType, fmt.Sprintf(`{"%s": maxOutputTokens}`, field))
 }
 
+func publishProductionZenConfig(t *testing.T, name, apiType, raw string) {
+	t.Helper()
+	require.NoError(t, model.InitializeBuiltinProviderConfig(model.DB))
+	snapshot, err := model.GetBuiltinProviderConfig()
+	require.NoError(t, err)
+	release, err := builtinconfig.Parse(snapshot.DraftJSON)
+	require.NoError(t, err)
+	rules := release.Config.ModelConfigRules.BuiltinProviderModelRules[:0]
+	for _, rule := range release.Config.ModelConfigRules.BuiltinProviderModelRules {
+		if rule["modelId"] != name || !strings.HasPrefix(fmt.Sprint(rule["providerId"]), "account:new-api-") {
+			rules = append(rules, rule)
+		}
+	}
+	config := map[string]any{"enabled": false}
+	if parsed, err := model.ParseZenModelMetadata(raw); err == nil {
+		apiType = parsed.APIType
+		body, err := common.Marshal(parsed.ModelConfig)
+		require.NoError(t, err)
+		require.NoError(t, common.Unmarshal(body, &config))
+	}
+	release.Config.ModelConfigRules.BuiltinProviderModelRules = append(rules, map[string]any{"providerId": "account:new-api-" + apiType, "modelId": name, "config": config})
+	body, err := common.Marshal(release)
+	require.NoError(t, err)
+	snapshot, err = model.SaveBuiltinProviderConfig(snapshot.Version, string(body))
+	require.NoError(t, err)
+	_, err = model.PublishBuiltinProviderConfig(snapshot.Version)
+	require.NoError(t, err)
+}
+
 func setupZenProductionRouter(t *testing.T, observers ...gin.HandlerFunc) (*gin.Engine, model.UserSubscription) {
 	t.Helper()
 	setupRelayRouterTestDB(t)
+	t.Setenv("XCODE_PUBLIC_ORIGIN", "http://127.0.0.1:59080")
 	require.NoError(t, i18n.Init())
-	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Model{}, &model.UserSession{}, &model.ZenAuthorization{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.Task{}, &model.Log{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Model{}, &model.Option{}, &model.UserSession{}, &model.ZenAuthorization{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.Task{}, &model.Log{}))
 	previousMemoryCache, previousRateLimit := common.MemoryCacheEnabled, setting.ModelRequestRateLimitEnabled
 	common.MemoryCacheEnabled, setting.ModelRequestRateLimitEnabled = false, false
 	t.Cleanup(func() {
@@ -95,7 +126,7 @@ func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *tes
 		{"/v1/messages", "anthropic-messages", "max_tokens"},
 		{"/v1/responses", "openai-responses", "max_output_tokens"},
 	} {
-		for _, reason := range []string{"nonexistent", "orphan", "channel-off", "ability-off", "missing", "invalid", "metadata-disabled", "config-disabled", "wrong-protocol"} {
+		for _, reason := range []string{"nonexistent", "orphan", "channel-off", "ability-off", "invalid", "metadata-disabled", "config-disabled", "wrong-protocol"} {
 			t.Run(protocol.apiType+"/"+reason, func(t *testing.T) {
 				name := protocol.apiType + "-" + reason
 				if reason != "nonexistent" {
@@ -124,6 +155,7 @@ func TestManagedProductionRoutesRejectUnavailableModelsBeforeDistribution(t *tes
 							raw = productionZenConfig(wrong)
 						}
 						require.NoError(t, model.DB.Create(&model.Model{ModelName: name, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(raw)}).Error)
+						publishProductionZenConfig(t, name, protocol.apiType, raw)
 						if reason == "metadata-disabled" {
 							require.NoError(t, model.DB.Model(&model.Model{}).Where("model_name = ?", name).Update("status", 0).Error)
 						}
@@ -195,7 +227,7 @@ export const protocols = {openai_responses: {
 		code                     string
 		pluginReached            bool
 	}{
-		{"missing metadata", "", `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
+		{"disabled central configuration", "", `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
 		{"disabled metadata", strings.Replace(productionZenConfig("openai-responses"), `"enabled":true`, `"enabled":false`, 1), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
 		{"wrong protocol", productionZenConfig("openai-chat-completions"), `,"max_output_tokens":1`, "productionmanagedkey", 403, "XCODE_MODEL_UNAVAILABLE", false},
 		{"absent output bound", productionZenConfig("openai-responses"), "", "productionmanagedkey", 400, "invalid_request", false},
@@ -206,7 +238,7 @@ export const protocols = {openai_responses: {
 		{"native without metadata or output bound", "", "", "productionnativekey", 400, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", tc.config).Error)
+			publishProductionZenConfig(t, metadata.ModelName, "openai-responses", tc.config)
 			body := `{"model":"claimed-admission-model","input":"reject"` + tc.limit + `}`
 			response := productionRelayRequest(engine, "/v1/responses", tc.key, body, !tc.pluginReached)
 			require.Equal(t, tc.status, response.Code, response.Body.String())
@@ -286,7 +318,7 @@ export const protocols = {openai_responses: {
 		ordinary.SetSetting(kitdto.ChannelSettings{PassThroughBodyEnabled: true})
 		require.NoError(t, model.DB.Create(&ordinary).Error)
 		require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: "claimed-admission-model", ChannelId: ordinary.Id, Enabled: true, Priority: ordinary.Priority}).Error)
-		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionZenConfig("openai-responses")).Error)
+		publishProductionZenConfig(t, metadata.ModelName, "openai-responses", productionZenConfig("openai-responses"))
 		for _, tc := range []struct{ name, extra, input, key string }{
 			{name: "background rejected", extra: `,"background":true`, input: "hello", key: "productionmanagedkey"},
 			{name: "stream rejected", extra: `,"stream":true`, input: "hello", key: "productionmanagedkey"},
@@ -323,7 +355,7 @@ export const protocols = {openai_responses: {
 			if managed {
 				key, limit, raw = "productionmanagedkey", `,"max_output_tokens":1`, productionZenConfig("openai-responses")
 			}
-			require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", raw).Error)
+			publishProductionZenConfig(t, metadata.ModelName, "openai-responses", raw)
 			before := submissions.Load()
 			response := productionRelayRequest(engine, "/v1/responses", key, `{"model":"claimed-admission-model","input":"hello"`+limit+`}`, false)
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -351,7 +383,7 @@ export const protocols = {openai_responses: {
 		previousRetries := common.RetryTimes
 		common.RetryTimes = 1
 		t.Cleanup(func() { common.RetryTimes = previousRetries })
-		require.NoError(t, model.DB.Model(&metadata).Update("x_code_config", productionZenConfig("openai-responses")).Error)
+		publishProductionZenConfig(t, metadata.ModelName, "openai-responses", productionZenConfig("openai-responses"))
 		response := productionRelayRequest(engine, "/v1/responses", "productionmanagedkey", `{"model":"claimed-admission-model","input":"paid-retry","max_output_tokens":1}`, false)
 		assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
 		assert.Contains(t, response.Body.String(), "XCODE_QUOTA_EXHAUSTED")
@@ -419,6 +451,7 @@ export const protocols = {openai_responses: {
 		require.NoError(t, channel.AddAbilities(model.DB))
 	}
 	require.NoError(t, model.DB.Create(&model.Model{ModelName: modelName, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig("openai-responses"))}).Error)
+	publishProductionZenConfig(t, modelName, "openai-responses", productionZenConfig("openai-responses"))
 	require.NoError(t, model.DB.Create(&model.Task{TaskID: "origin-limit-task", UserId: sub.UserId, ChannelId: plugin.Id, Platform: constant.TaskPlatform(pluginKey), Status: model.TaskStatusSuccess}).Error)
 	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", sub.UserId).Update("role", common.RoleAdminUser).Error)
 
@@ -584,6 +617,7 @@ func TestManagedProductionRelayPreservesOutputLimitsAndLiveGroupRouting(t *testi
 		require.NoError(t, model.DB.Create(&channel).Error)
 		require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: protocol.name, ChannelId: channel.Id, Enabled: true}).Error)
 		require.NoError(t, model.DB.Create(&model.Model{ModelName: protocol.name, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(productionZenConfig(protocol.apiType))}).Error)
+		publishProductionZenConfig(t, protocol.name, protocol.apiType, productionZenConfig(protocol.apiType))
 		for _, managed := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/managed=%t", protocol.apiType, managed), func(t *testing.T) {
 				key, limit := "productionnativekey", ""

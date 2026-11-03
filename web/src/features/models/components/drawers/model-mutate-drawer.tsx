@@ -529,53 +529,7 @@ export function ModelMutateDrawer(props: {
                       />
                     </SideDrawerSection>
 
-                    <SideDrawerSection>
-                      <div
-                        role='region'
-                        aria-label={t('aiscoo configuration')}
-                        className='space-y-4'
-                      >
-                        <h3 className='text-sm font-semibold'>
-                          {t('aiscoo configuration')}
-                        </h3>
-                        <FormField
-                          control={form.control}
-                          name='xcode_config'
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('aiscoo model JSON')}</FormLabel>
-                              <FormControl>
-                                <JsonEditor
-                                  value={field.value ?? ''}
-                                  onChange={field.onChange}
-                                  valueType='any'
-                                  ariaLabel={t('aiscoo model JSON')}
-                                  disabled={isSubmitting}
-                                  emptyMessage={t(
-                                    'No aiscoo configuration. Add complete JSON to enable this model for aiscoo.'
-                                  )}
-                                />
-                              </FormControl>
-                              <FormDescription>
-                                {t(
-                                  'Configure schema_version, api_type and model_config. The server validates capabilities; official metadata sync leaves this configuration unchanged.'
-                                )}
-                              </FormDescription>
-                              <FormMessage />
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                disabled={isSubmitting || !field.value}
-                                onClick={() => field.onChange('')}
-                              >
-                                {t('Clear aiscoo configuration')}
-                              </Button>
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                    </SideDrawerSection>
+                    {/* XCODE: 客户端能力改由系统设置集中发布，不在模型元数据表单写入。 */}
 
                     {/* Status & Sync */}
                     <SideDrawerSection>

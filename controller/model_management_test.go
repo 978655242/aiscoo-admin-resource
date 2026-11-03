@@ -580,98 +580,42 @@ export function parseTaskResult() { return {}; }
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 
-			t.Run("xcode_config_native_mutations_and_sync", func(t *testing.T) {
+			t.Run("retired_xcode_config_is_archived_and_not_writable", func(t *testing.T) {
 				var created struct {
 					Success bool
 					Data    model.Model
 				}
-				modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", map[string]any{
-					"model_name": "matrix-xcode", "status": 1, "sync_official": 1, "xcode_config": zenModelMetadataFixture,
-				}, &created)
+				modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", map[string]any{"model_name": "matrix-xcode", "status": 1, "sync_official": 1}, &created)
 				require.True(t, created.Success)
 				require.Positive(t, created.Data.Id)
-				assert.Equal(t, zenModelMetadataFixture, string(created.Data.ZenConfig))
+				full := zenModelMetadataFixture + strings.Repeat(" ", 65536-len(zenModelMetadataFixture))
+				require.NoError(t, db.Model(&model.Model{}).Where("id = ?", created.Data.Id).Update("x_code_config", full).Error)
 				read := func() model.Model {
 					var saved model.Model
 					require.NoError(t, db.First(&saved, created.Data.Id).Error)
 					return saved
 				}
-				for _, bad := range []any{nil, true, 1, map[string]any{}, "null", `{}`, strings.Replace(zenModelMetadataFixture, `"enabled":false,`, "", 1),
-					zenModelMetadataFixture + strings.Repeat(" ", 65537-len(zenModelMetadataFixture))} {
+				for _, value := range []any{nil, true, 1, map[string]any{}, "", zenModelMetadataFixture} {
 					before := read()
 					var rejected struct{ Success bool }
-					modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{
-						"id": before.Id, "model_name": before.ModelName, "description": "must not persist", "status": 1, "sync_official": 1, "xcode_config": bad,
-					}, &rejected)
+					modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{"id": before.Id, "model_name": before.ModelName, "description": "must not persist", "status": 1, "xcode_config": value}, &rejected)
 					assert.False(t, rejected.Success)
-					assert.Equal(t, before, read(), "invalid configuration must not partially update metadata")
-					modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", map[string]any{
-						"model_name": "matrix-xcode-invalid", "status": 1, "xcode_config": bad,
-					}, &rejected)
+					assert.Equal(t, before, read())
+					modelManagementRequest(t, CreateModelMeta, http.MethodPost, "/api/models/", map[string]any{"model_name": "matrix-xcode-rejected", "status": 1, "xcode_config": value}, &rejected)
 					assert.False(t, rejected.Success)
-					var count int64
-					require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "matrix-xcode-invalid").Count(&count).Error)
-					assert.Zero(t, count)
 				}
-				invalid := model.Model{ModelName: "matrix-xcode-domain-invalid", ZenConfig: "{}", Status: 1}
-				require.Error(t, invalid.Insert(), "direct model callers share the trusted validation boundary")
-				invalid = read()
-				invalid.Description = "domain rejection"
-				bad := "{}"
-				require.Error(t, invalid.Update(&bad))
-				assert.Empty(t, read().Description)
-
-				stale := read()
-				staleVersion := model.MetadataRecordVersion(&stale, nil, nil)
-				next := strings.Replace(zenModelMetadataFixture, `"enabled":false`, `"enabled":true`, 1)
-				revised := read()
-				require.NoError(t, revised.Update(&next))
-				revised.UpdatedTime = stale.UpdatedTime
-				assert.NotEqual(t, staleVersion, model.MetadataRecordVersion(&revised, nil, nil), "a config-only change invalidates the official sync preview")
 				current := read()
-				_, err := model.ApplyMetadataSync([]model.MetadataSyncUpdate{{
-					MetadataSyncSelection: model.MetadataSyncSelection{ModelName: current.ModelName, RecordVersion: staleVersion, Fields: []string{"description"}},
-					Values:                model.MetadataValues{Description: "stale sync"},
-				}}, nil)
-				require.ErrorIs(t, err, model.ErrMetadataSyncConflict)
-				stale.Description = "unrelated stale edit"
-				require.NoError(t, stale.Update(nil))
-				assert.Equal(t, next, string(read().ZenConfig), "omission must not restore the stale local configuration")
-				var edited struct {
-					Success bool
-					Data    model.Model
-				}
-				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{
-					"id": current.Id, "model_name": current.ModelName, "description": "omitted patch", "status": 1, "sync_official": 1,
-				}, &edited)
-				require.True(t, edited.Success)
-				assert.Equal(t, next, string(edited.Data.ZenConfig))
-				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/?status_only=true", map[string]any{
-					"id": current.Id, "status": 0, "xcode_config": "",
-				}, &edited)
-				require.True(t, edited.Success)
-				assert.Zero(t, read().Status)
-				assert.Equal(t, next, string(read().ZenConfig))
+				stalePatch := "{}"
+				current.Description = "ordinary metadata edit"
+				require.NoError(t, current.Update(&stalePatch))
+				assert.Equal(t, full, string(read().ZenConfig), "domain callers cannot rewrite the archive")
 				current = read()
-				_, err = model.ApplyMetadataSync([]model.MetadataSyncUpdate{{
-					MetadataSyncSelection: model.MetadataSyncSelection{ModelName: current.ModelName, RecordVersion: model.MetadataRecordVersion(&current, nil, nil), Fields: []string{"description", "status"}},
-					Values:                model.MetadataValues{Description: "official description", Status: 1},
-				}}, nil)
+				_, err := model.ApplyMetadataSync([]model.MetadataSyncUpdate{{MetadataSyncSelection: model.MetadataSyncSelection{ModelName: current.ModelName, RecordVersion: model.MetadataRecordVersion(&current, nil, nil), Fields: []string{"description", "status"}}, Values: model.MetadataValues{Description: "official description", Status: 1}}}, nil)
 				require.NoError(t, err)
 				assert.Equal(t, "official description", read().Description)
-				assert.Equal(t, next, string(read().ZenConfig))
-				// Exactly 64 KiB must persist too: MySQL TEXT's 65535-byte cap is not enough.
-				full := zenModelMetadataFixture + strings.Repeat(" ", 65536-len(zenModelMetadataFixture))
-				current = read()
-				require.NoError(t, current.Update(&full))
 				assert.Equal(t, full, string(read().ZenConfig))
-				edited.Data = model.Model{}
-				modelManagementRequest(t, UpdateModelMeta, http.MethodPut, "/api/models/", map[string]any{
-					"id": current.Id, "model_name": current.ModelName, "status": 1, "sync_official": 1, "xcode_config": "",
-				}, &edited)
-				require.True(t, edited.Success)
-				assert.Empty(t, read().ZenConfig)
-				assert.Empty(t, edited.Data.ZenConfig)
+				response := modelManagementRequest(t, GetAllModelsMeta, http.MethodGet, "/api/models/", nil, nil)
+				assert.NotContains(t, response.Body.String(), "xcode_config")
 			})
 
 			t.Run("square_states_follow_catalog_policy", func(t *testing.T) {

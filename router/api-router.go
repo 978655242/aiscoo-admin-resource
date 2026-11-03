@@ -22,6 +22,12 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
+	apiRouter.GET("/v1/client/configs", controller.PublicClientConfigs)
+	apiRouter.GET("/v1/client/builtin-provider-config/:digest", controller.PublicBuiltinProviderConfig)
+	builtinConfigRoute := apiRouter.Group("/builtin-provider-config", middleware.RootAuth(), middleware.DisableCache())
+	builtinConfigRoute.GET("", controller.GetBuiltinProviderConfig)
+	builtinConfigRoute.PUT("", controller.SaveBuiltinProviderConfig)
+	builtinConfigRoute.POST("/publish", controller.PublishBuiltinProviderConfig)
 	zenAuthRoute := apiRouter.Group("/xcode/v1/auth", middleware.DisableCache(), func(c *gin.Context) {
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Next()

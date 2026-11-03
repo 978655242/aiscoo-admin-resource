@@ -20,35 +20,6 @@ import (
 
 var ErrZenModelUnavailable = errors.New("aiscoo zen model is unavailable for this protocol")
 
-// xcodeCatalogModel is shared by the catalog and targeted admission. Native
-// prefix/contains/suffix description rules are not capability declarations.
-func zenCatalogModel(modelID string, metadata *model.Model) dto.ZenCatalogModel {
-	entry := dto.ZenCatalogModel{ModelID: modelID, DisplayName: modelID}
-	reason := "model_metadata_missing"
-	if metadata == nil || metadata.ZenConfig == "" {
-		entry.DisabledReason = &reason
-		return entry
-	}
-	parsed, err := model.ParseZenModelMetadata(string(metadata.ZenConfig))
-	if err != nil {
-		reason = "model_metadata_invalid"
-		entry.DisabledReason = &reason
-		return entry
-	}
-	entry.APIType, entry.ModelConfig = &parsed.APIType, &parsed.ModelConfig
-	switch {
-	case metadata.Status != 1:
-		reason = "model_disabled"
-	case !parsed.ModelConfig.Enabled:
-		reason = "model_config_disabled"
-	default:
-		entry.Enabled = true
-		return entry
-	}
-	entry.DisabledReason = &reason
-	return entry
-}
-
 func zenRequestPath(apiType string) string {
 	switch apiType {
 	case dto.ZenAPITypeAnthropicMessages:
@@ -78,6 +49,10 @@ func GetZenModelCatalog(userID int) (*dto.ZenCatalogSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	release, publishedHash, err := model.GetPublishedBuiltinProviderConfig()
+	if err != nil {
+		return nil, err
+	}
 	// SQL collations differ across supported databases; authority is exact and
 	// digest ordering must not depend on the database's collation.
 	abilities = slices.DeleteFunc(abilities, func(ability model.ZenAvailableAbility) bool { return ability.Group != user.Group })
@@ -95,7 +70,7 @@ func GetZenModelCatalog(userID int) (*dto.ZenCatalogSnapshot, error) {
 	}
 	var metadata []model.Model
 	if len(modelIDs) > 0 {
-		if err := model.DB.Select("model_name", "name_rule", "status", "x_code_config", "icon", "vendor_id").
+		if err := model.DB.Select("model_name", "name_rule", "status", "icon", "vendor_id").
 			Where("model_name IN ? AND name_rule = ?", modelIDs, model.NameRuleExact).Find(&metadata).Error; err != nil {
 			return nil, err
 		}
@@ -123,24 +98,26 @@ func GetZenModelCatalog(userID int) (*dto.ZenCatalogSnapshot, error) {
 		SchemaVersion: dto.ZenModelSchemaVersion, ServerTime: time.Now().UnixMilli(), AuthorizationRevision: "0",
 		Models: make([]dto.ZenCatalogModel, 0, len(modelIDs)),
 	}
-	invalidMetadata := make(map[string]string)
+	modelAbilities := make(map[string][]model.ZenAvailableAbility)
+	for _, ability := range abilities {
+		modelAbilities[ability.Model] = append(modelAbilities[ability.Model], ability)
+	}
 	nativeMetadataStatus := make(map[string]int, len(metadata))
 	for _, modelID := range modelIDs {
 		row := byName[modelID]
 		if row != nil {
 			nativeMetadataStatus[modelID] = row.Status
 		}
-		entry := zenCatalogModel(modelID, row)
+		entry, err := resolveZenCatalogModel(modelID, row, release, modelAbilities[modelID])
+		if err != nil {
+			return nil, err
+		}
 		if row != nil {
 			if icon := cmp.Or(strings.TrimSpace(row.Icon), strings.TrimSpace(vendorIcons[row.VendorID])); icon != "" {
 				entry.Icon = &icon
 			}
 		}
 		snapshot.Models = append(snapshot.Models, entry)
-		if row != nil && entry.DisabledReason != nil && *entry.DisabledReason == "model_metadata_invalid" {
-			digest := sha256.Sum256([]byte(row.ZenConfig))
-			invalidMetadata[modelID] = hex.EncodeToString(digest[:])
-		}
 	}
 	// Hash normalized effective facts, not secrets, metadata prose or clocks.
 	type routeFact struct {
@@ -268,10 +245,10 @@ func GetZenModelCatalog(userID int) (*dto.ZenCatalogSnapshot, error) {
 		Group                string
 		Abilities            []routingFact
 		Models               []dto.ZenCatalogModel
-		InvalidMetadata      map[string]string
+		PublishedConfig      string
 		NativeMetadataStatus map[string]int
 		Authorization        authorizationFact
-	}{user.Id, user.Group, facts, snapshot.Models, invalidMetadata, nativeMetadataStatus, authorization})
+	}{user.Id, user.Group, facts, snapshot.Models, publishedHash, nativeMetadataStatus, authorization})
 	if err != nil {
 		return nil, err
 	}
@@ -297,15 +274,15 @@ func ValidateZenModelRequest(userID int, modelID, apiType string, maxTokens ...*
 	if requestPath == "" {
 		return "", types.NewErrorWithStatusCode(ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
-	available, err := model.HasZenAvailableModel(user.Group, modelID, requestPath)
+	abilities, err := model.GetZenAvailableModelAbilities(user.Group, modelID)
 	if err != nil {
 		return "", types.NewErrorWithStatusCode(ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
 	}
-	if !available {
+	if len(abilities) == 0 {
 		return "", types.NewErrorWithStatusCode(ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	var candidates []model.Model
-	err = model.DB.Select("model_name", "name_rule", "status", "x_code_config").
+	err = model.DB.Select("model_name", "name_rule", "status").
 		Where("model_name = ? AND name_rule = ?", modelID, model.NameRuleExact).Find(&candidates).Error
 	if err != nil {
 		return "", types.NewErrorWithStatusCode(ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
@@ -317,7 +294,14 @@ func ValidateZenModelRequest(userID int, modelID, apiType string, maxTokens ...*
 			break
 		}
 	}
-	entry := zenCatalogModel(modelID, metadata)
+	release, _, err := model.GetPublishedBuiltinProviderConfig()
+	if err != nil {
+		return "", types.NewErrorWithStatusCode(ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+	}
+	entry, err := resolveZenCatalogModel(modelID, metadata, release, abilities)
+	if err != nil {
+		return "", types.NewErrorWithStatusCode(ErrZenBackendUnavailable, "XCODE_BACKEND_UNAVAILABLE", http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+	}
 	if !entry.Enabled || entry.APIType == nil || *entry.APIType != apiType {
 		return "", types.NewErrorWithStatusCode(ErrZenModelUnavailable, "XCODE_MODEL_UNAVAILABLE", http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}

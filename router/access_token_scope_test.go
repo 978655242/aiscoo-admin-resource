@@ -67,6 +67,10 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/subscription/epay/return",
 	"POST /api/subscription/epay/return",
 
+	// Anonymous Built-in discovery and immutable release bodies.
+	"GET /api/v1/client/configs",
+	"GET /api/v1/client/builtin-provider-config/:digest",
+
 	// Anonymous desktop update manifest.
 	"GET /api/v1/releases/electron/manifest",
 

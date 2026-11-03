@@ -503,6 +503,7 @@ func TestZenFundingPolicyDatabaseMatrix(t *testing.T) {
 				})
 			}
 			t.Run("managed HTTP protocol errors", func(t *testing.T) {
+				t.Setenv("XCODE_PUBLIC_ORIGIN", "http://127.0.0.1:59080")
 				f := fixture(t, "wallet_only")
 				require.NoError(t, db.Model(&f.subscriptions[1]).Update("amount_used", 100).Error)
 				key := fmt.Sprintf("fundinghttp%d", sequence)
@@ -535,6 +536,9 @@ func TestZenFundingPolicyDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Create(&channel).Error)
 					require.NoError(t, db.Create(&model.Ability{Group: "default", Model: protocol.modelID, ChannelId: channel.Id, Enabled: true}).Error)
 					require.NoError(t, db.Create(&model.Model{ModelName: protocol.modelID, NameRule: model.NameRuleExact, Status: 1, ZenConfig: model.LongText(zenModelConfigFixture(protocol.apiType))}).Error)
+					require.NoError(t, model.InitializeBuiltinProviderConfig(db))
+					publishZenTestMetadata(t, protocol.modelID, zenModelConfigFixture(protocol.apiType))
+
 					router := gin.New()
 					router.POST(protocol.path, middleware.TokenAuth(), func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyOriginalModel, protocol.modelID)

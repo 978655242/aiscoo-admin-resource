@@ -321,11 +321,25 @@ func testZenStartupMigration(t *testing.T, dialect, dsn, origin string) {
 	}
 	scopeSubscriptions := make([]UserSubscription, len(scopeCases))
 	scopeRecords := make([]SubscriptionPreConsumeRecord, len(scopeCases))
+	var builtinState *BuiltinProviderSnapshot
 	for pass := range 3 {
 		err := InitDB()
 		db = DB
 		connections = append(connections, db)
 		require.NoError(t, err, "production InitDB pass %d", pass+1)
+		currentBuiltin, err := GetBuiltinProviderConfig()
+		require.NoError(t, err)
+		if pass == 0 {
+			builtinState = currentBuiltin
+			require.NotNil(t, builtinState.PublishedRevision)
+			assert.Greater(t, *builtinState.PublishedRevision, int64(43))
+			body, err := GetBuiltinProviderRelease(builtinState.PublishedHash)
+			require.NoError(t, err)
+			assert.Equal(t, builtinState.DraftJSON, body)
+			assert.Greater(t, len(body), 65535, "startup must persist the complete bundled release")
+		} else {
+			assert.Equal(t, builtinState, currentBuiltin, "repeated production startup preserves draft and publication")
+		}
 		require.True(t, db.Migrator().HasTable(&ZenRevokeOperation{}))
 		require.True(t, db.Migrator().HasIndex(&ZenRevokeOperation{}, "idx_x_code_revoke_operations_expires_at"))
 		if pass == 0 && !upgrade {

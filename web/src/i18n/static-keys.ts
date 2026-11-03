@@ -19,6 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  // XCODE: 集中配置的设置页动作与轻校验使用动态翻译键。
+  'Save draft',
+  'Import a complete Release JSON with schemaVersion 1, a safe integer revision, and both rule groups.',
   // Model API reference labels and descriptions.
   'A description for music generation, subject to upstream requirements.',
   'A realtime-capable model ID supplied in the WebSocket URL query.',

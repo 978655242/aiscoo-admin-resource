@@ -104,32 +104,24 @@ func GetModelMeta(c *gin.Context) {
 	common.ApiSuccess(c, &m)
 }
 
-// The raw override distinguishes an omitted patch from null or an explicit empty string.
-func bindModelMetadata(c *gin.Context) (model.Model, *string, error) {
+// Reject retired writes explicitly; model CRUD cannot bypass central publication.
+func bindModelMetadata(c *gin.Context) (model.Model, error) {
 	var request struct {
 		model.Model
 		ZenConfig common.RawMessage `json:"xcode_config"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		return model.Model{}, nil, err
+		return model.Model{}, err
 	}
-	if len(request.ZenConfig) == 0 {
-		return request.Model, nil, nil
+	if len(request.ZenConfig) != 0 {
+		return model.Model{}, errors.New("xcode_config is archived; use Built-in provider configuration")
 	}
-	if common.GetJsonType(request.ZenConfig) != "string" {
-		return model.Model{}, nil, errors.New("xcode_config must be a JSON string")
-	}
-	var config string
-	if err := common.Unmarshal(request.ZenConfig, &config); err != nil {
-		return model.Model{}, nil, err
-	}
-	request.Model.ZenConfig = model.LongText(config)
-	return request.Model, &config, nil
+	return request.Model, nil
 }
 
 // CreateModelMeta 新建模型
 func CreateModelMeta(c *gin.Context) {
-	m, _, err := bindModelMetadata(c)
+	m, err := bindModelMetadata(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -164,7 +156,7 @@ func CreateModelMeta(c *gin.Context) {
 func UpdateModelMeta(c *gin.Context) {
 	statusOnly := c.Query("status_only") == "true"
 
-	m, zenConfig, err := bindModelMetadata(c)
+	m, err := bindModelMetadata(c)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -202,7 +194,7 @@ func UpdateModelMeta(c *gin.Context) {
 			return
 		}
 
-		if err := m.Update(zenConfig); err != nil {
+		if err := m.Update(); err != nil {
 			common.ApiError(c, err)
 			return
 		}

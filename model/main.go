@@ -405,7 +405,10 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return migrateZenSubscriptionScopes(DB)
+	if err := migrateZenSubscriptionScopes(DB); err != nil {
+		return err
+	}
+	return InitializeBuiltinProviderConfig(DB)
 }
 
 func migrateZenSubscriptionScopes(db *gorm.DB) error {

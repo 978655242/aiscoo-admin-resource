@@ -235,6 +235,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if IsBuiltinProviderOption(key) {
+		return common.NewMessage("Built-in provider configuration must use its dedicated management API")
+	}
 	if strings.HasPrefix(key, "WeChatOpen") || key == "ServerAddress" {
 		common.OptionMapRWMutex.RLock()
 		enabled, appID, secret, callback, address := common.WeChatOpenEnabled, common.WeChatOpenAppID, common.WeChatOpenAppSecret, common.WeChatOpenCallbackURL, system_setting.ServerAddress
@@ -416,7 +419,7 @@ func updateOptionMap(key string, value string) (err error) {
 	case "Logo":
 		value = common.NormalizeSystemLogo(value)
 	}
-	if key == retiredThemeOptionKey || key == legacyAccessTokenRetireAtKey {
+	if IsBuiltinProviderOption(key) || key == retiredThemeOptionKey || key == legacyAccessTokenRetireAtKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()
